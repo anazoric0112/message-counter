@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="tab_import" type="id" />
+    <item name="tab_graphs" type="id" />
+    <item name="tab_reports" type="id" />
+</resources>
