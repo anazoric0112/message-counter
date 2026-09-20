@@ -24,8 +24,8 @@ The first build requires internet access to download Gradle and dependencies. Th
 
 1. Export a WhatsApp chat **without media**, and select its UTF-8 `.txt` file through **Add WhatsApp exports**. ZIP archives and media attachments are not imported.
 2. Add one or several exports. Files accumulate in selection order, without deduplicating overlapping messages. Selecting the same URI again does not add it twice. Remove an unwanted file with its trash button.
-3. Enter participant names, one per line. Defaults are `Ana`, `Zara`, start month `0.0`, end month `12.99`. Previously saved values take precedence.
-4. Choose **Messages** or **Words**, select counting rules, and press **Analyze**. Analysis runs off the UI thread and can be cancelled.
+3. Enter participant names, one per line; the default is empty. The month range defaults to start `0.0`, end `12.99`. Previously saved values take precedence. Month fields show `(M.YY)` and date fields show `(D.M.YY)`.
+4. Choose **Messages** or **Words** and press **Analyze**. A single corrected Python-derived rule set is used; there is no separate calendar-correct option. Analysis runs off the UI thread and can be cancelled.
 5. Open **Graphs** or **Reports**. Report filters are under **Report settings**. Change local options and press **Update graph** or **Update reports** to apply them. Exports use the last successfully rendered output.
 
 File permissions and form settings are retained across app restarts. Results survive screen rotation; after a fresh process launch, press Analyze again. Files remain in their original location and must still be accessible. Settings and pending exports survive normal activity recreation, but an export interrupted by process termination must be started again.
@@ -57,7 +57,7 @@ Participant names beside the checkboxes match their on-screen lines and points. 
 
 Every graph has **Starting date** and **Ending date** fields. Press **Update graph** to apply an inclusive interval: both boundary days are counted. Switching graph modes carries the dates currently entered into the next graph, even before pressing Update graph. The shared dates survive rotation and app restarts. On upgrading from per-graph dates, the previously selected graph's saved interval initializes the shared range. Use dates such as `1.7.26` and `31.7.26`, or their four-digit-year equivalents. The defaults are `0.0.0` (no lower cutoff) and `31.12.99` (31 December 2099). PNG and graph CSV exports use the last applied interval.
 
-Date filtering is an app enhancement beyond the original Python graph arguments. Monthly graphs sum only the included days, so a partial-month interval does not include the rest of that month. Hourly and ten-minute graphs sum date-specific time buckets; weekday graphs sum the selected days using the chosen counting rules. All four Overview panels use the same interval, cumulative totals start within it, and its final panel shows the last month intersecting that interval. Graph filters never change the imported totals or Reports. Daily, monthly and weekday data remain limited to the Import month range; in Python-compatible mode, hourly data still includes imported dates outside that range when the graph interval includes them.
+Date filtering is an app enhancement beyond the original Python graph arguments. Monthly graphs sum only the included days, so a partial-month interval does not include the rest of that month. Hourly and ten-minute graphs sum date-specific time buckets; weekday graphs sum the selected days. All four Overview panels use the same interval, cumulative totals start within it, and its final panel shows the last month intersecting that interval. Graph filters never change the imported totals or Reports. All counters, including per-file participant totals and hourly/ten-minute data, are limited to the Import month range; graph intervals can narrow that range but cannot restore excluded messages.
 
 Graphs use AndroidPlot. The four overview panels retain their existing layout, stack on the phone and export as a 2x2 PNG. Other graphs open fitted to the available screen width so the complete selected data range is visible without horizontal scrolling. **Expand graph** below the chart switches to the configured wide view with horizontal scrolling; **Fit to screen** returns to the fitted view and resets its scroll position. The toggle changes only the on-screen width, not the data, filters, chart height or exports. Other graphs export individually.
 
@@ -67,7 +67,26 @@ Y-axis scales start at zero and use whole-number steps chosen from 1, 2 or 5 tim
 
 ## Reports and appearance
 
-The app uses a charcoal, purple and mint theme with fine grid lines, outlined controls and restrained heading glow. JetBrains Mono 2.304 is bundled for regular and bold monospace text. It provides a similar coding-font feel to Consolas without redistributing the proprietary Windows font. Its SIL Open Font License is included in `app/src/main/assets/licenses/JetBrainsMono-OFL.txt`. On-screen graphs follow the dark theme; PNG exports retain a white background.
+The top-right settings button opens **App settings**. Select a named theme to apply it immediately; each row previews its two main colors with glowing circles aligned on the right. Selection persists across rotation and app restarts. The back button or Android Back returns to the previous tab, with the current analysis retained. Controls, headings, report highlights and the first two on-screen participant colors follow the selected theme; participant color assignments remain stable when filtering.
+
+| Theme | Color pair |
+| --- | --- |
+| Cyber Shark | Saturated green and purple (original) |
+| Wither | Pomegranate and powder blue |
+| Dusk | Burnt saffron and dark denim blue |
+| Coffee Shop | Espresso and cobalt blue |
+| Garden | Smoky jade and oxblood |
+| Console | Persimmon and petrol teal |
+| Nostalgia | Celadon and aubergine |
+| Dim Light | Magenta-purple and teal-blue |
+| Eden | Whimsical pink and emerald green |
+| Neon Lights | Neon yellow-lime (#CCFF00) and turquoise (#00FFC2) |
+| Pacman | Fluorescent yellow (#F5FF00) and pure blue (#0000FF) |
+| Mediterranean | Neon orange (#FF7F00) and chartreuse (#7FFF00) |
+| Synth Wave | Neon orange (#FF7F00) and purple (#7400CC) |
+| Love Letter | Pink (#FF0059) and dark green (#0A6300) |
+
+The image-inspired palettes retain their deeper reference tones, including burgundy, oxblood, espresso, aubergine and dark emerald. Swatches, fills and glow use those base colors; text, icons and chart lines use lighter same-hue companions only when needed for contrast on charcoal. The original green-purple theme is unchanged. Fine grid lines and glowing control borders remain in every theme, with stronger focused and selected states. JetBrains Mono 2.304 is bundled for regular and bold monospace text. It provides a similar coding-font feel to Consolas without redistributing the proprietary Windows font. Its SIL Open Font License is included in `app/src/main/assets/licenses/JetBrainsMono-OFL.txt`. PNG exports keep their separate high-contrast palette and white background.
 
 - **Participant totals**, **Monthly counts**, **Daily counts**, **Latest month**, and **Summary** each have a tappable heading with an expand/collapse arrow. Sections start expanded and remember their states independently across report updates, rotation and app restarts. Collapsing hides only the section's content: selected years/days, counts and complete CSV exports are preserved. Headings expose their expanded state and expand/collapse actions to accessibility services.
 - Report month labels read `September 2026`, and numeric daily dates read `23.9.2023.`. Two-digit years are expanded for display; full years are not prefixed again. The same readable dates are used in report CSVs. Report filter inputs retain the original numeric formats.
@@ -75,35 +94,31 @@ The app uses a charcoal, purple and mint theme with fine grid lines, outlined co
 - **Daily counts** shows one month at a time, with previous/next arrows and a month picker. Each day displays its exact count and activity shading. Tap a day to see its complete date and count below the calendar. The busiest day is separated into its own highlighted band. The selected month/day is remembered.
 - **Latest month** uses the same calendar, daily counts, activity shading and selected-day/busiest-day highlights. It shows the full month selected by the existing counting rules, independently of the daily/monthly report filters. Its selected day is remembered separately from Daily counts.
 - Tap a month count in the year table to open that month in the daily calendar, when it is included by the daily filter. This automatically expands **Daily counts** if it was collapsed. Empty months remain available. Dates before the daily starting-date filter are disabled; zero-count dates within the filter remain selectable.
-- Calendar placement uses real modern month lengths and Monday-first weekdays, including leap days. This is a presentation choice in both modes, not a change to Python-compatible counters or weekday graphs. Nonexistent zero-count compatibility slots such as February 31 are not shown as calendar dates.
+- Calendar placement and stored daily counters use real month lengths, including leap days. Calendars use Monday-first weekdays; nonexistent dates such as February 31 are neither stored nor displayed.
 - Participant totals and other reports use aligned, striped rows, colored headers and separated totals. The Summary report is grouped into totals and import diagnostics. The old export-count/threshold/status section and its settings have been removed. Long non-calendar tables retain 100-row pagination.
 
 The save icon beside **Report settings** still exports all report rows, not just the visible year, month or page, with full integer counts. CSV quoting uses Apache Commons CSV; formula-like text is prefixed with an apostrophe for spreadsheet safety. PNG and CSV exports use Android's destination picker, not a fixed `out` directory.
 
 ## Counting compatibility
 
-**Python-compatible is the default.** Its tested reference is `core/src/test/resources/python-compatibility.json`. It intentionally retains these behaviors:
+**The app uses one corrected Python-derived rule set.** The reference in `core/src/test/resources/python-compatibility.json` retains the original sender behavior, with updated expectations for these intentional fixes:
 
-- Header format: `1.2.24., 08:09 - Alex: hello`. The original dot-separated two-digit-year format is required. Leading zeroes retain the original string-matching behavior in date trackers; for normal results, use unpadded dates like the Python input format.
-- Every configured month has 31 internal slots, including non-calendar dates with zero counts. The Reports calendar displays only real dates.
-- Weekdays use the literal year (for example year 24, not 2024).
+- Daily slots use actual month lengths and Gregorian leap-year rules. Two-digit years map to 2000-2099 for calendar validation; nonexistent dates are rejected before counting.
+- A message consists of its timestamped header and following continuation lines. It counts once in Messages mode; all of its body words count in Words mode. System entries end the preceding message, and orphan lines at the start of a file are not attached to the previous file's message.
+- All counters, including overall/per-file participant totals and hourly/ten-minute buckets, exclude messages outside the inclusive Import month range.
+
+Header examples are `1.2.24., 08:09 - Alex: hello` and `01.02.2024, 08:09 - Alex: hello`. Dot-separated two- or four-digit years and padded dates are accepted, with an optional dot before the comma. Other locales, slash dates, AM/PM times and iOS bracketed headers are not supported yet.
+
+The remaining Python conventions are unchanged:
+
 - Sender matching is case-sensitive, uses prefixes, and the last matching configured name wins. An unknown sender inherits the previous recognized sender, even across files.
-- Non-header continuation lines are ignored in both counting modes, just as `NameTracker.track` returns an empty name for them.
-- Participant totals and hourly buckets include messages outside the configured month range. Day, month and weekday trackers do not.
-- For message totals, the resolved participant's name must also occur in the line. Word counts preserve the original colon-slicing and unknown-sender behavior. Lines containing `<Media omitted>` are skipped in word mode.
-- Ten-minute labels use the original bucket notation `08:00` through `08:05`, corresponding to actual 08:00 through 08:50.
-- The overview's final panel uses the last configured month intersecting its graph interval, even when empty. The latest-month report retains the separate original reverse-search behavior, which does not inspect month index zero when multiple months are configured.
+- Participant message totals require the resolved name to occur in the header, whereas dated/hourly counters still include inherited senders. Unknown-sender messages can therefore still cause those totals to differ. Word counts retain the original unknown-sender attribution and header-word behavior. Messages containing `<Media omitted>` are excluded in Words mode.
+- Weekday calculations retain the original literal-year convention, and ten-minute labels retain the bucket notation `08:00` through `08:05`, corresponding to actual 08:00 through 08:50.
+- The overview's final panel uses the last configured month intersecting its graph interval, even when empty. The latest-month report retains the original reverse search, which does not inspect month index zero when multiple months are configured.
 
-To reproduce the current two-file `main.py` workflow, import the primary export first and the extra export second, then select the first file as the report's participant-total source. Graphs still aggregate both files.
+Old saved `PYTHON_COMPATIBLE` or `CALENDAR_CORRECT` selections no longer control analysis and are removed when settings are saved. Participant names, count mode, import range and other settings are retained.
 
-**Calendar-correct** is an explicit alternative, not parity mode:
-
-- Real month lengths, leap days and weekdays; two-digit years map to 2000-2099.
-- Exact, case-sensitive sender names; unknown senders are skipped, not inherited.
-- Multiline message bodies count as one message; continuation words are included in word mode.
-- Dot-separated two- or four-digit years and padded dates are accepted, with optional dot before the comma. Other locales, slash dates, AM/PM times and iOS bracketed headers are not supported yet.
-- All counters, including totals and hourly buckets, use the configured date range.
-- Actual ten-minute labels such as `08:50`, and latest-active-month selection including index zero.
+For multiple files, import the primary export first and the extra export second, then select the first file as the report's participant-total source if needed. Graphs still aggregate both files within the Import range. The original Python scripts remain unchanged, so results can now differ from them in the three corrected areas above.
 
 Use one year convention consistently in Import configuration and report filters. Graph date filters accept two- or four-digit years independently of that convention; this comparison does not change Python-compatible weekday calculations. For dates after 2099, set the graph's ending year explicitly.
 

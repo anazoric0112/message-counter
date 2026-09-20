@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
@@ -17,8 +18,12 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -26,7 +31,6 @@ import com.porukecounter.core.AnalysisConfig
 import com.porukecounter.core.AnalysisResult
 import com.porukecounter.core.ChartData
 import com.porukecounter.core.CountMode
-import com.porukecounter.core.CountingRules
 import com.porukecounter.core.GraphKind
 import com.porukecounter.core.GraphOptions
 import com.porukecounter.core.Graphs
@@ -43,6 +47,11 @@ import org.json.JSONArray
 class MainActivity : ComponentActivity() {
     private val model: AppModel by viewModels()
     private lateinit var root: LinearLayout
+    private lateinit var settingsPage: LinearLayout
+    private var settingsOpen = false
+    private val settingsBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = showSettings(false)
+    }
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
     private lateinit var pages: List<ScrollView>
@@ -54,7 +63,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var startInput: EditText
     private lateinit var endInput: EditText
     private lateinit var modeInput: Spinner
-    private lateinit var rulesInput: Spinner
     private var lastFiles: List<ChatFile>? = null
     private var lastResult: AnalysisResult? = null
     private var activeTab = 0
@@ -89,18 +97,32 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(savedColorTheme().style)
         super.onCreate(savedInstanceState)
         activeTab = savedInstanceState?.getInt("tab") ?: 0
         root = column().apply {
             setPadding(dp(16), dp(8), dp(16), 0)
             background = techBackground()
         }
-        root.label("Poruke Counter", 22f, true).apply {
-            setTextColor(accent)
-            setShadowLayer(dp(6).toFloat(), 0f, 0f, 0x667DF4B6)
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
         }
+        toolbar.label("Poruke Counter", 22f, true).apply {
+            setTextColor(primaryTextAccent)
+            setShadowLayer(dp(8).toFloat(), 0f, 0f, (primaryAccent and 0x00FFFFFF) or 0x99000000.toInt())
+            setPadding(0, 0, dp(8), 0)
+            maxLines = 1
+            setAutoSizeTextTypeUniformWithConfiguration(14, 22, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        toolbar.iconButton("App settings", android.R.drawable.ic_menu_manage) { showSettings(true) }
+        root.addView(toolbar)
         status = root.label("", 11f).apply { setTextColor(muted) }
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(primaryTextAccent)
+        }
         root.addView(progress, LinearLayout.LayoutParams(-1, dp(4)))
         val tabs = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
         val tabIds = listOf(R.id.tab_import, R.id.tab_graphs, R.id.tab_reports)
@@ -112,7 +134,7 @@ class MainActivity : ComponentActivity() {
                 buttonDrawable = null
                 setTextColor(android.content.res.ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(accent, muted),
+                    intArrayOf(primaryTextAccent, muted),
                 ))
                 background = controlBackground()
                 gravity = android.view.Gravity.CENTER
@@ -138,11 +160,27 @@ class MainActivity : ComponentActivity() {
             }
         }
         tabs.setOnCheckedChangeListener { _, selected -> selectTab(tabIds.indexOf(selected)) }
-        setContentView(root)
+        settingsPage = SettingsViews.page(this, savedColorTheme(), back = { showSettings(false) }) { selected ->
+            if (selected != savedColorTheme()) {
+                model.preferences.edit().putString("colorTheme", selected.name).apply()
+                recreate()
+            }
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(root, FrameLayout.LayoutParams(-1, -1))
+            addView(settingsPage, FrameLayout.LayoutParams(-1, -1))
+        })
+        onBackPressedDispatcher.addCallback(this, settingsBack)
         buildImport()
         buildGraphs(null)
         buildReports(null)
         selectTab(activeTab)
+        showSettings(savedInstanceState?.getBoolean("settingsOpen") ?: false)
+        val pageScroll = savedInstanceState?.getIntArray("pageScroll")
+        pages.forEachIndexed { index, page -> page.doOnLayout { page.scrollTo(0, pageScroll?.getOrNull(index) ?: 0) } }
+        settingsPage.findViewWithTag<ScrollView>("theme-scroll").doOnLayout {
+            it.scrollTo(0, savedInstanceState?.getInt("settingsScroll") ?: 0)
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 model.state.collect { state ->
@@ -166,6 +204,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showSettings(visible: Boolean) {
+        settingsOpen = visible
+        settingsBack.isEnabled = visible
+        root.visibility = if (visible) View.GONE else View.VISIBLE
+        settingsPage.visibility = if (visible) View.VISIBLE else View.GONE
+        if (visible) {
+            settingsPage.requestFocus()
+            WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
+        }
+    }
+
     private fun selectTab(index: Int) {
         activeTab = index.coerceIn(0, 2)
         pages.forEachIndexed { pageIndex, page -> page.visibility = if (pageIndex == activeTab) View.VISIBLE else View.GONE }
@@ -178,10 +227,9 @@ class MainActivity : ComponentActivity() {
         inputPage.divider()
         val config = model.savedConfig()
         namesInput = inputPage.field("Participants (one per line)", config.names.joinToString("\n"), multiline = true)
-        startInput = inputPage.field("Start month", config.startMonth)
-        endInput = inputPage.field("End month", config.endMonth)
+        startInput = inputPage.field("Start month (M.YY)", config.startMonth)
+        endInput = inputPage.field("End month (M.YY)", config.endMonth)
         modeInput = inputPage.choices("Count", listOf("Messages", "Words"), config.countMode.ordinal)
-        rulesInput = inputPage.choices("Counting rules", listOf("Python-compatible", "Calendar-correct"), config.rules.ordinal)
         inputPage.command("Analyze", android.R.drawable.ic_media_play, primary = true) {
             attempt { model.analyze(readConfig()) }
         }
@@ -195,7 +243,7 @@ class MainActivity : ComponentActivity() {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val label = TextView(this).apply {
                 text = file.name
-                techText(14f, color = accent)
+                techText(14f, color = primaryTextAccent)
                 setPadding(0, dp(10), dp(8), dp(10))
             }
             row.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
@@ -208,7 +256,6 @@ class MainActivity : ComponentActivity() {
         namesInput.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() },
         startInput.text.toString().trim(), endInput.text.toString().trim(),
         CountMode.entries[modeInput.selectedItemPosition],
-        CountingRules.entries[rulesInput.selectedItemPosition],
     )
 
     private fun buildGraphs(result: AnalysisResult?) {
@@ -241,8 +288,8 @@ class MainActivity : ComponentActivity() {
         currentGraphOptions = null
         val prefix = "graph.${kind.name}."
         fun stored(key: String, fallback: String) = model.preferences.getString(prefix + key, fallback)!!
-        val dateInput = parent.field("Starting date", model.preferences.getString("graph.from", stored("from", "0.0.0"))!!)
-        val endingInput = parent.field("Ending date", model.preferences.getString("graph.to", stored("to", "31.12.99"))!!)
+        val dateInput = parent.field("Starting date (D.M.YY)", model.preferences.getString("graph.from", stored("from", "0.0.0"))!!)
+        val endingInput = parent.field("Ending date (D.M.YY)", model.preferences.getString("graph.to", stored("to", "31.12.99"))!!)
         val nameChecks = mutableMapOf<String, CheckBox>()
         if (kind !in listOf(GraphKind.OVERVIEW, GraphKind.MONTHS)) {
             parent.label("Participants", 16f, true)
@@ -251,7 +298,7 @@ class MainActivity : ComponentActivity() {
                 (0 until array.length()).map { array.getString(it) }.toSet()
             }.getOrDefault(result.config.names.toSet())
             result.config.names.forEachIndexed { index, name ->
-                nameChecks[name] = parent.toggle(name, name in savedNames).apply { setTextColor(ChartViews.color(index)) }
+                nameChecks[name] = parent.toggle(name, name in savedNames).apply { setTextColor(ChartViews.color(context, index)) }
             }
         }
         val settings = column().apply { visibility = View.GONE }
@@ -339,8 +386,8 @@ class MainActivity : ComponentActivity() {
         }
         reportPage.addView(toolbar)
         reportPage.addView(settings)
-        val sinceDay = settings.field("Daily report starting date", stored("day", "0.0.0"))
-        val sinceMonth = settings.field("Monthly report starting month", stored("month", "0.0"))
+        val sinceDay = settings.field("Daily report starting date (D.M.YY)", stored("day", "0.0.0"))
+        val sinceMonth = settings.field("Monthly report starting month (M.YY)", stored("month", "0.0"))
         val file = settings.choices("Participant totals source", listOf("All files") + result.files.mapIndexed { index, counts -> "${index + 1}. ${counts.name}" }, model.preferences.getInt("report.file", 0))
         val extra = column().apply { visibility = View.GONE }
         settings.command("Summary settings", android.R.drawable.ic_menu_manage) {
@@ -425,6 +472,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("tab", activeTab)
+        outState.putBoolean("settingsOpen", settingsOpen)
+        outState.putIntArray("pageScroll", pages.map { it.scrollY }.toIntArray())
+        outState.putInt("settingsScroll", settingsPage.findViewWithTag<ScrollView>("theme-scroll").scrollY)
         super.onSaveInstanceState(outState)
     }
 }

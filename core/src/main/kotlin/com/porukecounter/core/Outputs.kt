@@ -119,7 +119,7 @@ object Graphs {
                 (0..23).map { hour -> (hour * 6 until hour * 6 + 6).sumOf { values[it] } }
             }
             GraphKind.TEN_MINUTES -> personChart("$unit per person per 10 minutes", (0..143).map {
-                String.format(Locale.ROOT, "%02d:%02d", it / 6, it % 6 * if (result.config.rules == CountingRules.CALENDAR_CORRECT) 10 else 1)
+                String.format(Locale.ROOT, "%02d:%02d", it / 6, it % 6)
             }) { timeValues(it).toList() }
             GraphKind.PERSON_MONTHS -> personChart("$unit per person per month", monthLabels) { monthlyValues(it.days) }
             GraphKind.WEEKDAYS -> personChart("$unit per person per weekday", (0..6).map { it.toString() }) { person ->
@@ -127,7 +127,7 @@ object Graphs {
                 for (index in dayIndices) {
                     if (person.days[index] == 0L) continue
                     val parts = dateParts(result.days[index], 3)
-                    val year = if (result.config.rules == CountingRules.CALENDAR_CORRECT && parts[0] < 100) parts[0] + 2000 else parts[0]
+                    val year = parts[0]
                     val weekday = LocalDate.of(year, parts[1], parts[2]).dayOfWeek.value - 1
                     values[weekday] += person.days[index]
                 }
@@ -227,8 +227,7 @@ object Reports {
                 calendarMonths += ReportCalendarMonth(month, calendarDays)
             }
         }
-        val firstCandidate = if (result.config.rules == CountingRules.PYTHON_COMPATIBLE) 1 else 0
-        val latestIndex = (result.months.lastIndex downTo firstCandidate).firstOrNull { result.monthTotals[it] != 0L } ?: result.months.lastIndex
+        val latestIndex = (result.months.lastIndex downTo 1).firstOrNull { result.monthTotals[it] != 0L } ?: result.months.lastIndex
         val latest = result.months[latestIndex]
         val latestRows = listOf(listOf("Month", ReportDates.month(latest)), listOf("Count", "${result.monthTotals[latestIndex]}")) +
             result.days.indices.filter { result.days[it].substringAfter('.') == latest && result.dayTotals[it] > 0 }.map {
@@ -247,7 +246,7 @@ object Reports {
         val summary = listOf(
             listOf("Configured-range count", "${result.rangeTotal}"),
             listOf("Sum of months", "${result.monthTotals.sum()}"),
-            listOf("All-file participant total", "${result.total}"),
+            listOf("Participant total in import range", "${result.total}"),
             listOf("Hourly tracker total", "${result.hourlyTotal}"),
             listOf("$numerator / $denominator", ratio),
             listOf("Pair total minus range total", "${totals.getValue(numerator) + totals.getValue(denominator) - result.rangeTotal}"),
@@ -261,7 +260,7 @@ object Reports {
             ReportSection("Monthly counts", monthRows, ReportLayout.YEAR_TABLE, months = monthCounts),
             ReportSection("Daily counts", dayRows, ReportLayout.CALENDAR, calendarMonths = calendarMonths),
             ReportSection(
-                if (result.config.rules == CountingRules.PYTHON_COMPATIBLE) "Latest month (Python)" else "Latest active month",
+                "Latest month",
                 latestRows, ReportLayout.LATEST_CALENDAR, calendarMonths = listOf(latestCalendar),
             ),
             ReportSection("Summary", summary),

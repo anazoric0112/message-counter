@@ -2,7 +2,6 @@ package com.porukecounter.app
 
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
-import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
@@ -36,6 +35,10 @@ internal class ReportViews(
     private val unit: String,
 ) {
     private val context = parent.context
+    private val primaryAccent = context.primaryAccent
+    private val secondaryAccent = context.secondaryAccent
+    private val primaryTextAccent = context.primaryTextAccent
+    private val secondaryTextAccent = context.secondaryTextAccent
     private val numbers = NumberFormat.getIntegerInstance(Locale.US)
     private val fontScale = context.resources.configuration.fontScale.coerceAtLeast(1f)
     private var openMonth: ((String) -> Unit)? = null
@@ -60,7 +63,7 @@ internal class ReportViews(
 
     private fun sectionHeading(host: LinearLayout, section: ReportSection, number: Int, body: LinearLayout): () -> Unit {
         val title = section.title
-        host.divider(violet)
+        host.divider(secondaryAccent)
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -75,18 +78,18 @@ internal class ReportViews(
         }
         row.addView(TextView(context).apply {
             text = number.toString().padStart(2, '0')
-            techText(12f, true, accent)
+            techText(12f, true, primaryTextAccent)
             setPadding(0, 0, context.dp(12), 0)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         })
         row.addView(TextView(context).apply {
             text = title
-            techText(18f, true, violet)
-            setShadowLayer(context.dp(3).toFloat(), 0f, 0f, 0x44C5A2FF)
+            techText(18f, true, secondaryTextAccent)
+            setShadowLayer(context.dp(3).toFloat(), 0f, 0f, (secondaryAccent and 0x00FFFFFF) or 0x44000000)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(0, -2, 1f))
         val indicator = ImageView(context).apply {
-            imageTintList = ColorStateList.valueOf(violet)
+            imageTintList = ColorStateList.valueOf(secondaryTextAccent)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         row.addView(indicator, LinearLayout.LayoutParams(context.dp(32), context.dp(24)))
@@ -131,7 +134,7 @@ internal class ReportViews(
                 buttonDrawable = null
                 setTextColor(ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(accent, muted),
+                    intArrayOf(primaryTextAccent, muted),
                 ))
                 background = context.controlBackground()
                 gravity = Gravity.CENTER
@@ -215,19 +218,19 @@ internal class ReportViews(
                 val cell = tableCell(entry?.let { numbers.format(it.count) } ?: "-", rowHeight, stripe = month % 2 == 0)
                 if (entry == null) cell.setTextColor(0xFF63716C.toInt())
                 else {
-                    cell.setTextColor(if (entry.count > 0) accent else muted)
+                    cell.setTextColor(if (entry.count > 0) primaryTextAccent else muted)
                     cell.contentDescription = "${entry.label}, ${numbers.format(entry.count)} $unit"
                     cell.tag = "month-${entry.key}"
                     cell.isFocusable = true
                     if (entry == best) {
-                        cell.background = context.outline(0xFF2B253B.toInt(), violet, radius = 0)
-                        cell.setTextColor(violet)
+                        cell.background = context.outline(tintedSurface(secondaryAccent), secondaryAccent, radius = 0)
+                        cell.setTextColor(secondaryTextAccent)
                     }
                     cell.setOnClickListener { openMonth?.invoke(entry.key) }
                 }
                 column.addView(cell)
             }
-            column.addView(tableCell(numbers.format(entries.sumOf { it.count }), rowHeight, header = true).apply { setTextColor(accent) })
+            column.addView(tableCell(numbers.format(entries.sumOf { it.count }), rowHeight, header = true).apply { setTextColor(primaryTextAccent) })
             columns.addView(column, LinearLayout.LayoutParams(minimumColumnWidth, -2))
         }
         scroller.addView(columns)
@@ -238,10 +241,10 @@ internal class ReportViews(
 
     private fun tableCell(value: String, height: Int, header: Boolean = false, left: Boolean = false, stripe: Boolean = false): TextView = TextView(context).apply {
         text = value
-        techText(if (header) 13f else 12f, header, if (header) violet else ink)
+        techText(if (header) 13f else 12f, header, if (header) secondaryTextAccent else ink)
         gravity = Gravity.CENTER_VERTICAL or if (left) Gravity.START else Gravity.CENTER_HORIZONTAL
         setPadding(context.dp(8), context.dp(6), context.dp(8), context.dp(6))
-        background = context.outline(if (header) 0xFF222331.toInt() else if (stripe) 0xFF1B2427.toInt() else surface, ruleColor, 0)
+        background = context.outline(if (header) tintedSurface(secondaryAccent, 0.06f) else if (stripe) tintedSurface(primaryAccent, 0.025f) else surface, ruleColor, 0)
         setAutoSizeTextTypeUniformWithConfiguration(9, if (header) 13 else 12, 1, TypedValue.COMPLEX_UNIT_SP)
         maxLines = 2
         layoutParams = LinearLayout.LayoutParams(-1, height)
@@ -274,7 +277,7 @@ internal class ReportViews(
         }
         host.addView(navigation)
         val metadata = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        val total = TextView(context).apply { techText(13f, true, accent); setPadding(0, context.dp(12), 0, context.dp(12)) }
+        val total = TextView(context).apply { techText(13f, true, primaryTextAccent); setPadding(0, context.dp(12), 0, context.dp(12)) }
         metadata.addView(total, LinearLayout.LayoutParams(0, -2, 1f))
         val pageNumber = TextView(context).apply {
             techText(11f, color = muted)
@@ -287,7 +290,7 @@ internal class ReportViews(
         listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEachIndexed { index, day ->
             weekdayRow.addView(TextView(context).apply {
                 text = day
-                techText(10f, true, if (index > 4) violet else muted)
+                techText(10f, true, if (index > 4) secondaryTextAccent else muted)
                 gravity = Gravity.CENTER
             }, LinearLayout.LayoutParams(0, context.dp(30), 1f))
         }
@@ -324,7 +327,7 @@ internal class ReportViews(
                 grid.addView(row)
             }
             details.removeAllViews()
-            highlight(details, "Selected day", selected.label, selected.count, accent)
+            highlight(details, "Selected day", selected.label, selected.count, primaryAccent)
             highlight(details, "Busiest day", month.busiest?.label ?: "No activity", month.busiest?.count)
         }
         if (picker != null) {
@@ -353,8 +356,8 @@ internal class ReportViews(
         val count = day.count
         val textScale = fontScale.coerceAtMost(1.6f)
         val intensity = if (maximum == 0L || count == null) 0f else (count.toDouble() / maximum).toFloat()
-        val fill = if (selected) 0xFF2B263D.toInt() else Color.rgb(24, (33 + 30 * intensity).roundToInt(), (33 + 15 * intensity).roundToInt())
-        background = context.outline(fill, if (selected) violet else ruleColor, radius = 3)
+        val fill = if (selected) tintedSurface(secondaryAccent) else tintedSurface(primaryAccent, 0.02f + 0.12f * intensity)
+        background = context.outline(fill, if (selected) secondaryAccent else ruleColor, radius = 3)
         setPadding(context.dp(3), context.dp(5), context.dp(3), context.dp(4))
         isEnabled = count != null
         isFocusable = count != null
@@ -362,14 +365,14 @@ internal class ReportViews(
         tag = "day-${day.key}"
         addView(TextView(context).apply {
             text = day.day.toString()
-            techText(11f, selected, if (selected) violet else if (count != null) ink else 0xFF63716C.toInt())
+            techText(11f, selected, if (selected) secondaryTextAccent else if (count != null) ink else 0xFF63716C.toInt())
             gravity = Gravity.START
             includeFontPadding = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(-1, context.dp((20 * textScale).roundToInt())))
         addView(TextView(context).apply {
             text = count?.toString() ?: "-"
-            techText(12f, true, if ((count ?: 0L) > 0) accent else muted)
+            techText(12f, true, if ((count ?: 0L) > 0) primaryTextAccent else muted)
             gravity = Gravity.CENTER
             maxLines = 1
             includeFontPadding = false
@@ -379,22 +382,22 @@ internal class ReportViews(
         if (count != null) setOnClickListener { action() }
     }
 
-    private fun highlight(host: LinearLayout, title: String, detail: String, count: Long?, tint: Int = violet) {
+    private fun highlight(host: LinearLayout, title: String, detail: String, count: Long?, tint: Int = secondaryAccent) {
         val band = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(if (tint == accent) 0xFF22372E.toInt() else 0xFF2C253B.toInt(), surface))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(tintedSurface(tint), surface))
             setPadding(context.dp(12), context.dp(12), context.dp(12), context.dp(12))
         }
         val textColumn = context.column()
         textColumn.label(title, 11f).apply { setPadding(0, 0, 0, context.dp(6)); setTextColor(muted) }
-        textColumn.label(detail, 14f, true).apply { setPadding(0, 0, context.dp(8), 0); setTextColor(tint) }
+        textColumn.label(detail, 14f, true).apply { setPadding(0, 0, context.dp(8), 0); setTextColor(contrastColor(tint, tintedSurface(tint))) }
         band.addView(textColumn, LinearLayout.LayoutParams(0, -2, 1.5f))
         if (count != null) {
             val valueColumn = context.column()
             valueColumn.label(numbers.format(count), 20f, true).apply {
                 gravity = Gravity.END
-                setTextColor(accent)
+                setTextColor(primaryTextAccent)
                 setPadding(0, 0, 0, 0)
                 maxLines = 1
                 setAutoSizeTextTypeUniformWithConfiguration(11, 20, 1, TypedValue.COMPLEX_UNIT_SP)
@@ -428,7 +431,7 @@ internal class ReportViews(
                         "Parsed message headers" -> { body.divider(); body.label("IMPORT", 11f, true) }
                     }
                 }
-                if (cells.firstOrNull() == "Total") body.divider(accent)
+                if (cells.firstOrNull() == "Total") body.divider(primaryAccent)
                 tableRow(body, cells, emphasis = cells.firstOrNull() in listOf("Total", "Count"), stripe = index % 2 == 0)
             }
             navigation.removeAllViews()
@@ -449,13 +452,13 @@ internal class ReportViews(
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(if (header) 0xFF262333.toInt() else if (emphasis) 0xFF20342B.toInt() else if (stripe) surface else 0xFF1A2125.toInt())
+            setBackgroundColor(if (header) tintedSurface(secondaryAccent, 0.06f) else if (emphasis) tintedSurface(primaryAccent) else if (stripe) surface else canvasColor)
             minimumHeight = context.dp(44)
         }
         cells.forEachIndexed { index, value ->
             row.addView(TextView(context).apply {
                 text = value.toLongOrNull()?.let { numbers.format(it) } ?: value
-                techText(if (header) 11f else 13f, header || emphasis, if (header) violet else if (index > 0 || emphasis) accent else ink)
+                techText(if (header) 11f else 13f, header || emphasis, if (header) secondaryTextAccent else if (index > 0 || emphasis) primaryTextAccent else ink)
                 gravity = Gravity.CENTER_VERTICAL or if (index == 0) Gravity.START else Gravity.END
                 setPadding(context.dp(10), context.dp(12), context.dp(10), context.dp(12))
                 if (!header) setTextIsSelectable(true)

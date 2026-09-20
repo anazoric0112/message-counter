@@ -11,7 +11,6 @@ import com.porukecounter.core.AnalysisConfig
 import com.porukecounter.core.AnalysisResult
 import com.porukecounter.core.ChatAnalyzer
 import com.porukecounter.core.CountMode
-import com.porukecounter.core.CountingRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -51,17 +50,16 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun savedConfig(): AnalysisConfig = AnalysisConfig(
-        preferences.getString("names", "Ana\nZara")!!.lines().map { it.trim() }.filter { it.isNotEmpty() },
+        preferences.getString("names", "")!!.lines().map { it.trim() }.filter { it.isNotEmpty() },
         preferences.getString("start", "0.0")!!,
         preferences.getString("end", "12.99")!!,
         CountMode.valueOf(preferences.getString("mode", "MESSAGES")!!),
-        CountingRules.valueOf(preferences.getString("rules", "PYTHON_COMPATIBLE")!!),
     )
 
     fun saveConfig(config: AnalysisConfig) {
         preferences.edit().putString("names", config.names.joinToString("\n"))
             .putString("start", config.startMonth).putString("end", config.endMonth)
-            .putString("mode", config.countMode.name).putString("rules", config.rules.name).apply()
+            .putString("mode", config.countMode.name).remove("rules").apply()
     }
 
     fun addFiles(uris: List<Uri>) {

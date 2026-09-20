@@ -2,9 +2,9 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">@font/console_font</item>
-        <item name="android:colorAccent">#7DF4B6</item>
+        <item name="android:colorAccent">#4AFFA1</item>
         <item name="android:colorControlNormal">#B5C1C8</item>
-        <item name="android:colorControlActivated">#C5A2FF</item>
+        <item name="android:colorControlActivated">#B77AFF</item>
         <item name="android:textColorPrimary">#ECF3F0</item>
         <item name="android:textColorSecondary">#A9B8B4</item>
         <item name="android:colorBackground">#111518</item>
@@ -14,5 +14,57 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowBackground">#111518</item>
         <item name="android:windowContentTransitions">true</item>
+    </style>
+    <style name="AppTheme.Pomegranate">
+        <item name="android:colorAccent">#7B1125</item>
+        <item name="android:colorControlActivated">#77c5ed</item>
+    </style>
+    <style name="AppTheme.Prussian">
+        <item name="android:colorAccent">#f5a23b</item>
+        <item name="android:colorControlActivated">#19416B</item>
+    </style>
+    <style name="AppTheme.Espresso">
+        <item name="android:colorAccent">#54301B</item>
+        <item name="android:colorControlActivated">#ff8585</item>
+    </style>
+    <style name="AppTheme.Jade">
+        <item name="android:colorAccent">#2B6951</item>
+        <item name="android:colorControlActivated">#6B101D</item>
+    </style>
+    <style name="AppTheme.Petrol">
+        <item name="android:colorAccent">#D15813</item>
+        <item name="android:colorControlActivated">#00676e</item>
+    </style>
+    <style name="AppTheme.Aubergine">
+        <item name="android:colorAccent">#96B274</item>
+        <item name="android:colorControlActivated">#552044</item>
+    </style>
+    <style name="AppTheme.Twilight">
+        <item name="android:colorAccent">#8E095B</item>
+        <item name="android:colorControlActivated">#044C57</item>
+    </style>
+    <style name="AppTheme.Forest">
+        <item name="android:colorAccent">#D64B8D</item>
+        <item name="android:colorControlActivated">#0E573F</item>
+    </style>
+    <style name="AppTheme.Citrus">
+        <item name="android:colorAccent">#CCFF00</item>
+        <item name="android:colorControlActivated">#00FFC2</item>
+    </style>
+    <style name="AppTheme.MagentaGold">
+        <item name="android:colorAccent">#F5FF00</item>
+        <item name="android:colorControlActivated">#0000FF</item>
+    </style>
+    <style name="AppTheme.LimePink">
+        <item name="android:colorAccent">#FF7F00</item>
+        <item name="android:colorControlActivated">#7FFF00</item>
+    </style>
+    <style name="AppTheme.PinkOrange">
+        <item name="android:colorAccent">#FF7F00</item>
+        <item name="android:colorControlActivated">#7400CC</item>
+    </style>
+    <style name="AppTheme.PinkGreen">
+        <item name="android:colorAccent">#FF0059</item>
+        <item name="android:colorControlActivated">#0A6300</item>
     </style>
 </resources>

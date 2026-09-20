@@ -12,10 +12,10 @@ class AnalyticsTest {
     }
 
     @Test
-    fun messagesMatchPythonFixture() = verifyFixture(CountMode.MESSAGES, "messages")
+    fun messagesMatchCorrectedPythonFixture() = verifyFixture(CountMode.MESSAGES, "messages")
 
     @Test
-    fun wordsMatchPythonFixture() = verifyFixture(CountMode.WORDS, "words")
+    fun wordsMatchCorrectedPythonFixture() = verifyFixture(CountMode.WORDS, "words")
 
     private fun verifyFixture(mode: CountMode, expectedKey: String) {
         val names = fixture.getAsJsonArray("names").map { it.asString }
@@ -49,9 +49,47 @@ class AnalyticsTest {
     }
 
     @Test
+    fun pythonCompatibleCountsWholeMessagesWithinRealCalendarMonths() {
+        for ((year, lastDay) in listOf(23 to 28, 24 to 29, 2000 to 29, 2100 to 28)) for (mode in CountMode.entries) {
+            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.$year", "2.$year", mode))
+            analyzer.consume("first.txt", sequenceOf(
+                "31.1.$year., 07:00 - Alex: outside range",
+                "outside continuation",
+                "1.2.$year., 08:09 - Alex Phone: hello there",
+                "another three words",
+                "$lastDay.2.$year., 09:19 - Alex: last day",
+                "${lastDay + 1}.2.$year., 10:00 - Alex: invalid date",
+                "1.3.$year., 11:00 - Alex: outside again",
+            ))
+            analyzer.consume("second.txt", sequenceOf(
+                "orphan continuation",
+                "2.2.$year., 12:29 - Alex: end of file",
+                "still same message",
+            ))
+            val result = analyzer.result()
+            val person = result.people.getValue("Alex")
+            val expected = if (mode == CountMode.MESSAGES) 3L else 13L
+            assertEquals(lastDay, result.days.size)
+            assertEquals("$lastDay.2.$year", result.days.last())
+            assertEquals(1L, result.stats.invalidHeaders)
+            assertEquals(expected, result.rangeTotal)
+            assertEquals(expected, result.total)
+            assertEquals(expected, result.hourlyTotal)
+            assertEquals(expected, person.days.sum())
+            assertEquals(expected, person.months.sum())
+            assertEquals(expected, person.tenMinutes.sum())
+            assertEquals(expected, person.tenMinutesByDay.values.sumOf { it.sum() })
+            assertEquals(expected, result.files.sumOf { it.totals.getValue("Alex") })
+            assertEquals(setOf("1.2.$year", "$lastDay.2.$year", "2.2.$year"), person.tenMinutesByDay.keys)
+            assertEquals(if (mode == CountMode.MESSAGES) 2L else 7L, result.files.first().totals.getValue("Alex"))
+            assertEquals(if (mode == CountMode.MESSAGES) 1L else 6L, result.files.last().totals.getValue("Alex"))
+        }
+    }
+
+    @Test
     fun datedTimeBucketsPreserveCountsAcrossFilesAndCountingModes() {
-        for (rules in CountingRules.entries) for (mode in CountMode.entries) {
-            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.24", "2.24", mode, rules))
+        for (mode in CountMode.entries) {
+            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.24", "2.24", mode))
             analyzer.consume("first.txt", sequenceOf(
                 "31.1.24., 07:00 - Alex: outside range",
                 "1.2.24., 08:09 - Alex: two words",
@@ -63,7 +101,7 @@ class AnalyticsTest {
             val result = analyzer.result()
             val person = result.people.getValue("Alex")
             assertEquals(if (mode == CountMode.MESSAGES) 3L else 7L, result.rangeTotal)
-            assertEquals(rules == CountingRules.PYTHON_COMPATIBLE, person.tenMinutesByDay.containsKey("31.1.24"))
+            assertEquals(false, person.tenMinutesByDay.containsKey("31.1.24"))
             assertEquals(if (mode == CountMode.MESSAGES) 1L else 2L, person.tenMinutesByDay.getValue("1.2.24")[48])
             assertEquals(if (mode == CountMode.MESSAGES) 1L else 3L, person.tenMinutesByDay.getValue("1.2.24")[49])
             assertEquals(if (mode == CountMode.MESSAGES) 1L else 2L, person.tenMinutesByDay.getValue("2.2.24")[59])
@@ -74,15 +112,16 @@ class AnalyticsTest {
             val hourly = Graphs.build(result, GraphKind.HOURS, GraphOptions(result.config.names)).single()
             assertEquals(person.hours.toList(), hourly.series.single().values)
             val outside = Graphs.build(result, GraphKind.HOURS, GraphOptions(result.config.names, "31.1.24", "31.1.24")).single()
-            val outsideCount = if (rules == CountingRules.CALENDAR_CORRECT) 0L else if (mode == CountMode.MESSAGES) 1L else 2L
-            assertEquals(outsideCount, outside.series.single().values.sum())
+            assertEquals(0L, outside.series.single().values.sum())
         }
     }
 
     @Test
     fun defaultImportBoundsAcceptAllChatMonthsWithoutEmptyCentury() {
-        for (rules in CountingRules.entries) for (mode in CountMode.entries) {
-            val config = AnalysisConfig(names = listOf("Alex"), countMode = mode, rules = rules)
+        assertEquals(emptyList(), AnalysisConfig().names)
+        assertFailsWith<IllegalArgumentException> { AnalysisConfig().validate() }
+        for (mode in CountMode.entries) {
+            val config = AnalysisConfig(names = listOf("Alex"), countMode = mode)
             assertEquals("0.0", config.startMonth)
             assertEquals("12.99", config.endMonth)
             config.validate()
@@ -103,40 +142,39 @@ class AnalyticsTest {
             assertEquals(result.months.size, person.months.size)
             assertEquals(2, result.files.size)
             val sections = Reports.build(result, ReportOptions())
+            assertEquals("Latest month", sections[3].title)
             assertEquals("March 2024", sections[3].calendarMonths.single().label)
             for (kind in GraphKind.entries) {
                 val charts = Graphs.build(result, kind, GraphOptions(config.names))
-                assertEquals(expected, charts.first().series.sumOf { it.values.sum() }, "$rules / $mode / $kind")
+                assertEquals(expected, charts.first().series.sumOf { it.values.sum() }, "$mode / $kind")
             }
         }
     }
 
     @Test
     fun openImportStartHandlesEmptyInputsAndExplicitEndMonths() {
-        for (rules in CountingRules.entries) {
-            val empty = ChatAnalyzer(AnalysisConfig(names = listOf("Alex"), rules = rules)).result()
-            assertEquals(listOf("1.0"), empty.months)
-            assertEquals(0L, empty.rangeTotal)
-            assertEquals("January 2000", Reports.build(empty, ReportOptions())[3].calendarMonths.single().label)
-            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "0.0", "3.24", rules = rules))
-            analyzer.consume("bounded.txt", sequenceOf(
-                "1.2.24., 08:00 - Alex: included",
-                "1.4.24., 08:00 - Alex: excluded",
-            ))
-            val result = analyzer.result()
-            assertEquals(listOf("2.24", "3.24"), result.months)
-            assertEquals(1L, result.rangeTotal)
-            assertEquals(if (rules == CountingRules.PYTHON_COMPATIBLE) 2L else 1L, result.total)
-        }
+        val empty = ChatAnalyzer(AnalysisConfig(names = listOf("Alex"))).result()
+        assertEquals(listOf("1.0"), empty.months)
+        assertEquals(0L, empty.rangeTotal)
+        assertEquals("January 2000", Reports.build(empty, ReportOptions())[3].calendarMonths.single().label)
+        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "0.0", "3.24"))
+        analyzer.consume("bounded.txt", sequenceOf(
+            "1.2.24., 08:00 - Alex: included",
+            "1.4.24., 08:00 - Alex: excluded",
+        ))
+        val result = analyzer.result()
+        assertEquals(listOf("2.24", "3.24"), result.months)
+        assertEquals(1L, result.rangeTotal)
+        assertEquals(1L, result.total)
         for (month in listOf("0.24", "13.24", "-1.24")) {
-            assertFailsWith<IllegalArgumentException> { AnalysisConfig(startMonth = month).validate() }
+            assertFailsWith<IllegalArgumentException> { AnalysisConfig(names = listOf("Alex"), startMonth = month).validate() }
         }
-        assertFailsWith<IllegalArgumentException> { AnalysisConfig(endMonth = "0.0").validate() }
+        assertFailsWith<IllegalArgumentException> { AnalysisConfig(names = listOf("Alex"), endMonth = "0.0").validate() }
     }
 
     @Test
     fun openImportStartSupportsFullYearsAndTheYear2000() {
-        val analyzer = ChatAnalyzer(AnalysisConfig(names = listOf("Alex"), rules = CountingRules.CALENDAR_CORRECT))
+        val analyzer = ChatAnalyzer(AnalysisConfig(names = listOf("Alex")))
         analyzer.consume("full-years.txt", sequenceOf(
             "1.1.2000, 08:00 - Alex: included",
             "31.12.2099, 09:00 - Alex: included",
@@ -149,7 +187,7 @@ class AnalyticsTest {
             val chart = Graphs.build(result, kind, GraphOptions(result.config.names, "1.1.2000", "1.1.2000")).first()
             assertEquals(1L, chart.series.sumOf { it.values.sum() })
         }
-        val fullYearConfig = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "0.0", "3.2024", rules = CountingRules.CALENDAR_CORRECT))
+        val fullYearConfig = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "0.0", "3.2024"))
         fullYearConfig.consume("bounded.txt", sequenceOf("1.2.2024, 08:00 - Alex: included"))
         assertEquals(listOf("2.2024", "3.2024"), fullYearConfig.result().months)
     }
@@ -203,7 +241,7 @@ class AnalyticsTest {
     fun dailyGraphHasWorkingDefaultsAndInclusiveBoundaries() {
         val result = sample()
         val defaults = Graphs.build(result, GraphKind.PERSON_DAYS, GraphOptions(result.config.names)).single()
-        assertEquals(62, defaults.labels.size)
+        assertEquals(60, defaults.labels.size)
         val filtered = Graphs.build(result, GraphKind.PERSON_DAYS, GraphOptions(listOf("Blair"), "2.2.24", "2.2.24")).single()
         assertEquals(listOf("2.2.24"), filtered.labels)
         assertEquals(listOf(1L), filtered.series.single().values)
@@ -225,8 +263,8 @@ class AnalyticsTest {
 
     @Test
     fun everyGraphFiltersInclusiveDaysInBothCountingModes() {
-        for (rules in CountingRules.entries) for (mode in CountMode.entries) {
-            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex", "Blair"), "12.23", "3.24", mode, rules))
+        for (mode in CountMode.entries) {
+            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex", "Blair"), "12.23", "3.24", mode))
             analyzer.consume("dates.txt", sequenceOf(
                 "31.12.23., 07:00 - Alex: before start",
                 "1.1.24., 08:09 - Alex: first day",
@@ -241,7 +279,7 @@ class AnalyticsTest {
             val expected = if (mode == CountMode.MESSAGES) 3L else 7L
             for (kind in GraphKind.entries) {
                 val charts = Graphs.build(result, kind, options)
-                assertEquals(expected, charts.first().series.sumOf { it.values.sum() }, "$rules / $mode / $kind")
+                assertEquals(expected, charts.first().series.sumOf { it.values.sum() }, "$mode / $kind")
                 charts.forEach { chart -> chart.series.forEach { assertEquals(chart.labels.size, it.values.size) } }
                 if (kind == GraphKind.OVERVIEW) {
                     assertEquals(expected, charts[1].series.single().values.sum())
@@ -254,7 +292,7 @@ class AnalyticsTest {
             assertEquals(listOf("January 2024", "February 2024"), monthly.labels)
             assertEquals(if (mode == CountMode.MESSAGES) listOf(2L, 1L) else listOf(5L, 2L), monthly.series.single().values)
             val weekdays = Graphs.build(result, GraphKind.WEEKDAYS, options).single()
-            val year = if (rules == CountingRules.CALENDAR_CORRECT) 2024 else 24
+            val year = 24
             val expectedWeekdays = LongArray(7)
             val alexIncrement = if (mode == CountMode.MESSAGES) 1L else 2L
             expectedWeekdays[java.time.LocalDate.of(year, 1, 1).dayOfWeek.value - 1] += alexIncrement
@@ -279,7 +317,7 @@ class AnalyticsTest {
                 Graphs.build(result, kind, GraphOptions(result.config.names, "2.2.2024", "1.2.24"))
             }
         }
-        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.2024", "3.2024", rules = CountingRules.CALENDAR_CORRECT))
+        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.2024", "3.2024"))
         analyzer.consume("full-years.txt", sequenceOf("29.2.2024, 08:09 - Alex: leap day"))
         for (kind in GraphKind.entries) {
             val charts = Graphs.build(analyzer.result(), kind, GraphOptions(listOf("Alex"), "29.2.24", "29.2.2024"))
@@ -291,9 +329,9 @@ class AnalyticsTest {
 
     @Test
     fun graphMonthsUseFullNamesAndYearsWithoutChangingCounts() {
-        for ((year, rules) in listOf(26 to CountingRules.PYTHON_COMPATIBLE, 26 to CountingRules.CALENDAR_CORRECT, 2026 to CountingRules.CALENDAR_CORRECT)) {
+        for (year in listOf(26, 2026)) {
             for (mode in CountMode.entries) {
-                val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "8.$year", "9.$year", mode, rules))
+            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "8.$year", "9.$year", mode))
                 analyzer.consume("months.txt", sequenceOf(
                     "31.8.$year., 08:00 - Alex: two words",
                     "1.9.$year., 09:00 - Alex: three whole words",
@@ -358,7 +396,7 @@ class AnalyticsTest {
     }
 
     @Test
-    fun calendarPresentationUsesRealDaysAndKeepsPythonCountersUnchanged() {
+    fun calendarPresentationUsesRealDaysAndKeepsCountersUnchanged() {
         val result = sample()
         val sections = Reports.build(result, ReportOptions(startingDate = "2.2.24"))
         val calendar = sections[2].calendarMonths
@@ -369,7 +407,7 @@ class AnalyticsTest {
         assertEquals(1L, calendar.first().total)
         assertEquals("2.2.2024.", calendar.first().busiest!!.label)
         assertEquals(0L, calendar.first().days.last().count)
-        assertEquals(62, result.days.size)
+        assertEquals(60, result.days.size)
         assertEquals(3L, result.rangeTotal)
         assertEquals(ReportLayout.YEAR_TABLE, sections[1].layout)
         assertEquals(listOf(2L, 1L), sections[1].months.map { it.count })
@@ -389,71 +427,74 @@ class AnalyticsTest {
 
     @Test
     fun latestMonthCalendarIsIndependentOfReportFilters() {
-        for (rules in CountingRules.entries) {
-            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "12.23", "3.24", rules = rules))
-            analyzer.consume("latest.txt", sequenceOf(
-                "31.12.23., 12:00 - Alex: hello",
-                "29.2.24., 12:00 - Alex: leap day",
-                "29.2.24., 13:00 - Alex: hello again",
-            ))
-            val sections = Reports.build(analyzer.result(), ReportOptions("1.3.24", "3.24"))
-            val latest = sections[3]
-            val month = latest.calendarMonths.single()
-            assertEquals(ReportLayout.LATEST_CALENDAR, latest.layout)
-            assertEquals("February 2024", month.label)
-            assertEquals(29, month.days.size)
-            assertEquals(3, month.firstWeekday)
-            assertEquals(0L, month.days.first().count)
-            assertEquals(2L, month.total)
-            assertEquals("29.2.2024.", month.busiest!!.label)
-            assertEquals(listOf("Count", "2"), latest.rows[1])
-            assertEquals(listOf("3.24"), sections[2].calendarMonths.map { it.key })
-        }
+        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "12.23", "3.24"))
+        analyzer.consume("latest.txt", sequenceOf(
+            "31.12.23., 12:00 - Alex: hello",
+            "29.2.24., 12:00 - Alex: leap day",
+            "29.2.24., 13:00 - Alex: hello again",
+        ))
+        val sections = Reports.build(analyzer.result(), ReportOptions("1.3.24", "3.24"))
+        val latest = sections[3]
+        val month = latest.calendarMonths.single()
+        assertEquals(ReportLayout.LATEST_CALENDAR, latest.layout)
+        assertEquals("February 2024", month.label)
+        assertEquals(29, month.days.size)
+        assertEquals(3, month.firstWeekday)
+        assertEquals(0L, month.days.first().count)
+        assertEquals(2L, month.total)
+        assertEquals("29.2.2024.", month.busiest!!.label)
+        assertEquals(listOf("Count", "2"), latest.rows[1])
+        assertEquals(listOf("3.24"), sections[2].calendarMonths.map { it.key })
     }
 
     @Test
-    fun latestMonthCalendarPreservesCountingModeSelection() {
-        for (rules in CountingRules.entries) {
-            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "12.23", "2.24", rules = rules))
-            analyzer.consume("first-only.txt", sequenceOf("31.12.23., 12:00 - Alex: hello"))
-            val month = Reports.build(analyzer.result(), ReportOptions())[3].calendarMonths.single()
-            if (rules == CountingRules.PYTHON_COMPATIBLE) {
-                assertEquals("2.24", month.key)
-                assertEquals(29, month.days.size)
-                assertEquals(0L, month.total)
-                assertEquals(null, month.busiest)
-            } else {
-                assertEquals("12.23", month.key)
-                assertEquals(31, month.days.size)
-                assertEquals(1L, month.total)
-            }
-        }
+    fun latestMonthCalendarPreservesPythonMonthSelection() {
+        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "12.23", "2.24"))
+        analyzer.consume("first-only.txt", sequenceOf("31.12.23., 12:00 - Alex: hello"))
+        val month = Reports.build(analyzer.result(), ReportOptions())[3].calendarMonths.single()
+        assertEquals("2.24", month.key)
+        assertEquals(29, month.days.size)
+        assertEquals(0L, month.total)
+        assertEquals(null, month.busiest)
     }
 
     @Test
-    fun calendarRulesUseRealDaysExactSendersAndMultilineWords() {
-        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex", "Alex Group", "Blair"), "2.24", "3.24", CountMode.WORDS, CountingRules.CALENDAR_CORRECT))
+    fun correctedRulesKeepPrefixMatchingAndInheritedSenders() {
+        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex", "Alex Group", "Blair"), "2.24", "3.24", CountMode.WORDS))
         analyzer.consume("fixture.txt", fixture["input"].asString.lineSequence())
         val result = analyzer.result()
         assertEquals(60, result.days.size)
         assertEquals(4L, result.people.getValue("Alex").total)
-        assertEquals(3L, result.people.getValue("Alex Group").total)
+        assertEquals(11L, result.people.getValue("Alex Group").total)
         assertEquals(0L, result.people.getValue("Blair").total)
-        assertEquals(7L, result.rangeTotal)
+        assertEquals(15L, result.rangeTotal)
         assertEquals(result.rangeTotal, result.hourlyTotal)
         assertEquals(4L, result.people.getValue("Alex").weekdays[3])
         assertEquals(1L, result.stats.unmatchedSenders)
     }
 
     @Test
-    fun calendarNormalizesPaddedDatesAndDoesNotCountSystemLinesAsWords() {
-        val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.24", "2.24", CountMode.WORDS, CountingRules.CALENDAR_CORRECT))
-        analyzer.consume("chat.txt", sequenceOf(
-            "01.02.2024, 08:09 - Alex: two words",
-            "02.02.2024, 08:10 - Alex changed the group description",
-            "unrelated line",
-        ))
-        assertEquals(2L, analyzer.result().total)
-        assertEquals(29, analyzer.result().days.size)
+    fun calendarNormalizesPaddedDatesAndKeepsSystemAndMediaMessageBoundaries() {
+        for (mode in CountMode.entries) {
+            val analyzer = ChatAnalyzer(AnalysisConfig(listOf("Alex"), "2.24", "2.24", mode))
+            analyzer.consume("chat.txt", sequenceOf(
+                "01.02.2024, 08:09 - Alex: two words",
+                "02.02.2024, 08:10 - Alex changed the group description",
+                "unrelated line",
+                "03.02.2024, 09:00 - Alex: <Media omitted>",
+                "media continuation",
+                "04.02.2024, 10:00 - Alex: first part",
+                "",
+                "last part: still words",
+            ))
+            val result = analyzer.result()
+            val expected = if (mode == CountMode.MESSAGES) 3L else 8L
+            assertEquals(expected, result.total)
+            assertEquals(expected, result.rangeTotal)
+            assertEquals(expected, result.hourlyTotal)
+            assertEquals(0L, result.dayTotals[1])
+            assertEquals(if (mode == CountMode.MESSAGES) 1L else 0L, result.dayTotals[2])
+            assertEquals(29, result.days.size)
+        }
     }
 }

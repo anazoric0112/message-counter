@@ -3,22 +3,22 @@
   "startMonth": "2.24",
   "endMonth": "3.24",
   "input": "1.2.24., 08:09 - Alex: hello there\ncontinued words\n1.2.24., 08:10 - Alex Group: three whole words\n2.2.24., 09:59 - Stranger: four more words here\n3.2.24., 10:00 - Blair: <Media omitted>\n1.4.24., 11:00 - Blair: outside window\n",
-  "daySlots": 62,
+  "daySlots": 60,
   "messages": {
-    "totals": {"Alex": 1, "Alex Group": 1, "Blair": 2},
+    "totals": {"Alex": 1, "Alex Group": 1, "Blair": 1},
     "months": [4, 0],
     "weekdays": {
       "Alex": [0, 0, 0, 1, 0, 0, 0],
       "Alex Group": [0, 0, 0, 1, 1, 0, 0],
       "Blair": [0, 0, 0, 0, 0, 1, 0]
     },
-    "hourTotal": 5
+    "hourTotal": 4
   },
   "words": {
-    "totals": {"Alex": 2, "Alex Group": 11, "Blair": 2},
-    "months": [13, 0],
+    "totals": {"Alex": 4, "Alex Group": 11, "Blair": 0},
+    "months": [15, 0],
     "weekdays": {
-      "Alex": [0, 0, 0, 2, 0, 0, 0],
+      "Alex": [0, 0, 0, 4, 0, 0, 0],
       "Alex Group": [0, 0, 0, 3, 8, 0, 0],
       "Blair": [0, 0, 0, 0, 0, 0, 0]
     },

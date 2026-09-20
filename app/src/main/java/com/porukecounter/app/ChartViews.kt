@@ -41,10 +41,14 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 internal object ChartViews {
-    private val colors = listOf("#7DF4B6", "#C5A2FF", "#77DDF0", "#F4BD72", "#EE86B9", "#B3D474", "#FF8D8D").map(Color::parseColor)
+    private val colors = listOf("#77DDF0", "#F4BD72", "#EE86B9", "#B3D474", "#FF8D8D").map(Color::parseColor)
     private val exportColors = listOf("#D56B16", "#2685C4", "#A248B3", "#21835B", "#A38A00", "#D54343", "#CF5588").map(Color::parseColor)
 
-    fun color(index: Int, export: Boolean = false): Int = if (export) exportColors[index % exportColors.size] else colors[index % colors.size]
+    fun color(context: Context, index: Int, export: Boolean = false): Int = if (export) exportColors[index % exportColors.size] else when (val position = index % (colors.size + 2)) {
+        0 -> context.primaryTextAccent
+        1 -> context.secondaryTextAccent
+        else -> colors[position - 2]
+    }
 
     fun add(parent: LinearLayout, data: ChartData, options: GraphOptions, hideDateLabels: Boolean = false, expandable: Boolean = false) {
         parent.label(data.title, 18f, true)
@@ -65,7 +69,7 @@ internal object ChartViews {
         parent.addView(scroll, LinearLayout.LayoutParams(-1, chartHeight))
         if (options.legend) {
             data.series.forEachIndexed { index, series ->
-                parent.label(series.name).setTextColor(color(series.colorIndex ?: index))
+                parent.label(series.name).setTextColor(color(parent.context, series.colorIndex ?: index))
             }
         }
         if (expandable) {
@@ -115,7 +119,7 @@ internal object ChartViews {
             panelBitmap.recycle()
             if (options.legend) {
                 chart.series.take(legendHeight / 18).forEachIndexed { seriesIndex, series ->
-                    titlePaint.color = color(series.colorIndex ?: seriesIndex, export = true)
+                    titlePaint.color = color(context, series.colorIndex ?: seriesIndex, export = true)
                     canvas.drawText(series.name.take(70), 12f, (plotHeight + 46 + seriesIndex * 18).toFloat(), titlePaint)
                 }
                 titlePaint.color = Color.rgb(31, 44, 40)
@@ -209,7 +213,7 @@ internal object ChartViews {
             rangeOriginLinePaint.color = if (options.yGrid) gridColor else Color.TRANSPARENT
         }
         data.series.forEachIndexed { index, series ->
-            val seriesColor = color(series.colorIndex ?: index, export)
+            val seriesColor = color(context, series.colorIndex ?: index, export)
             val formatter = LineAndPointFormatter(seriesColor, if (data.labels.size <= 31) seriesColor else null, null, null)
             formatter.linePaint.strokeWidth = 1.6f * scale
             formatter.vertexPaint?.strokeWidth = 4f * scale

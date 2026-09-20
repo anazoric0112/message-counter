@@ -41,7 +41,7 @@ import java.time.YearMonth
 @RunWith(AndroidJUnit4::class)
 class AppSmokeTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
-    private val context = instrumentation.targetContext
+    private val context = android.view.ContextThemeWrapper(instrumentation.targetContext, ColorTheme.NEON.style)
     private val sample = "1.2.24., 08:09 - Alex: hello there\n2.2.24., 09:59 - Blair: three whole words\n1.3.24., 10:00 - Alex: hello\n"
     private var savedPreferences: Map<String, *> = emptyMap<String, Any>()
 
@@ -67,6 +67,257 @@ class AppSmokeTest {
     }
 
     @Test
+    fun themePalettesMatchReferencesAndRemainReadable() {
+        val referenceColors = listOf(
+            "#4AFFA1" to "#B77AFF", "#7B2334" to "#77c5ed", "#f5a23b" to "#29496B",
+            "#543828" to "#ff8585", "#3B6957" to "#6B202B", "#D16C32" to "#00676e",
+            "#A2B28F" to "#552D48", "#8E1E63" to "#0D4D57", "#D66B9E" to "#1B5743",
+            "#CCFF00" to "#00FFC2", "#F5FF00" to "#0000FF", "#FF7F00" to "#7FFF00",
+            "#FF7F00" to "#7400CC", "#FF0059" to "#0A6300",
+        )
+        assertEquals(14, ColorTheme.entries.size)
+        ColorTheme.entries.forEachIndexed { index, option ->
+            val themed = android.view.ContextThemeWrapper(context, option.style)
+            assertEquals(themed.primaryTextAccent, ChartViews.color(themed, 0))
+            assertEquals(themed.secondaryTextAccent, ChartViews.color(themed, 1))
+            assertEquals(ChartViews.color(context, 0, export = true), ChartViews.color(themed, 0, export = true))
+            listOf(themed.primaryAccent, themed.secondaryAccent).forEachIndexed { colorIndex, color ->
+                val reference = Color.parseColor(if (colorIndex == 0) referenceColors[index].first else referenceColors[index].second)
+                val referenceComponents = FloatArray(3)
+                Color.colorToHSV(reference, referenceComponents)
+                val components = FloatArray(3)
+                Color.colorToHSV(color, components)
+                assertEquals("${option.label} should retain its reference hue", referenceComponents[0], components[0], 2f)
+                assertEquals("${option.label} must not get brighter", referenceComponents[2], components[2], 0.001f)
+                when (option) {
+                    ColorTheme.NEON, ColorTheme.CITRUS, ColorTheme.MAGENTA_GOLD, ColorTheme.LIME_PINK, ColorTheme.PINK_ORANGE, ColorTheme.PINK_GREEN ->
+                        assertEquals("${option.label} must use its exact neon colors", reference, color)
+                    else -> assertEquals("${option.label} needs richer saturation", (referenceComponents[1] + 0.15f).coerceAtMost(0.95f), components[1], 0.01f)
+                }
+                val textColor = if (colorIndex == 0) themed.primaryTextAccent else themed.secondaryTextAccent
+                Color.colorToHSV(textColor, components)
+                assertEquals("Readable text should keep the accent hue", referenceComponents[0], components[0], 2f)
+                if (option == ColorTheme.NEON) assertEquals("The original neon theme must stay unchanged", color, textColor)
+                val backgrounds = if (colorIndex == 0) {
+                    listOf(surface, tintedSurface(themed.primaryAccent, 0.14f), tintedSurface(themed.secondaryAccent))
+                } else {
+                    listOf(surface, tintedSurface(themed.secondaryAccent))
+                }
+                for (background in backgrounds) {
+                    assertTrue("${option.label} needs readable accent text", androidx.core.graphics.ColorUtils.calculateContrast(textColor, background) >= 4.5)
+                }
+            }
+        }
+        context.getSharedPreferences("poruke", 0).edit().putString("colorTheme", "unknown").commit()
+        assertEquals(ColorTheme.NEON, context.savedColorTheme())
+    }
+
+    @Test
+    fun settingsApplyEveryThemeAndPreserveAnalysis() {
+        val preferences = context.getSharedPreferences("poruke", 0)
+        val finalTheme = ColorTheme.entries.last()
+        preferences.edit().clear().putString("names", "Alex\nBlair")
+            .putInt("graphKind", GraphKind.PERSON_DAYS.ordinal)
+            .putString("graph.from", "1.2.24").putString("graph.to", "2.2.24").commit()
+        val file = File(context.filesDir, "theme-chat.txt").apply { writeText(sample) }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var model: AppModel
+            scenario.onActivity { activity ->
+                model = ViewModelProvider(activity)[AppModel::class.java]
+                model.addFiles(listOf(Uri.fromFile(file)))
+                model.analyze(model.savedConfig())
+            }
+            runBlocking { withTimeout(15000) { model.state.first { !it.busy && it.result != null } } }
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                activity.findViewById<RadioButton>(R.id.tab_graphs).performClick()
+                val button = descendants(activity.window.decorView).filterIsInstance<ImageButton>().single { it.contentDescription == "App settings" }
+                val title = descendants(activity.window.decorView).filterIsInstance<TextView>().first { it.text == "Poruke Counter" }
+                assertTrue("Settings must be in the top-right toolbar", button.left >= title.right)
+                assertTrue(button.width >= activity.dp(48) && button.height >= activity.dp(48))
+                button.performClick()
+            }
+            for (option in ColorTheme.entries) {
+                scenario.onActivity { activity ->
+                    val row = activity.window.decorView.findViewWithTag<RadioButton>("theme-${option.ordinal}")
+                    row.requestRectangleOnScreen(Rect(0, 0, row.width, row.height), true)
+                }
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { activity ->
+                    val row = activity.window.decorView.findViewWithTag<RadioButton>("theme-${option.ordinal}")
+                    val bounds = Rect()
+                    assertTrue("${option.label} must be reachable by scrolling", row.getGlobalVisibleRect(bounds))
+                    assertEquals("${option.label} must be fully visible", row.height, bounds.height())
+                    row.performClick()
+                }
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { activity ->
+                    val page = activity.window.decorView.findViewWithTag<View>("app-settings")
+                    assertTrue("Theme selection must stay in settings", page.isShown)
+                    val selected = descendants(page).filterIsInstance<RadioButton>().filter { it.isChecked }.single()
+                    assertEquals(option.label, selected.text.toString())
+                    val bounds = Rect()
+                    assertTrue("Selected theme must remain visible after applying", selected.getGlobalVisibleRect(bounds))
+                    assertEquals(selected.height, bounds.height())
+                    assertEquals(option, activity.savedColorTheme())
+                    val palette = android.view.ContextThemeWrapper(context, option.style)
+                    assertEquals(palette.primaryAccent, activity.primaryAccent)
+                    assertEquals(palette.secondaryAccent, activity.secondaryAccent)
+                    val heading = descendants(page).filterIsInstance<TextView>().first { it.text == "App settings" }
+                    assertEquals(palette.primaryTextAccent, heading.currentTextColor)
+                    assertTrue("Theme changes must retain the analysis model", model === ViewModelProvider(activity)[AppModel::class.java])
+                    assertEquals(3L, model.state.value.result!!.rangeTotal)
+                }
+                screenshot("settings-theme-${option.ordinal + 1}.png")
+                scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { activity ->
+                    assertTrue(activity.findViewById<RadioButton>(R.id.tab_graphs).isChecked)
+                    val views = descendants(activity.window.decorView).toList()
+                    val chart = views.filterIsInstance<com.androidplot.xy.XYPlot>().single { it.isShown }
+                    for (series in chart.registry.seriesList) {
+                        val expected = ChartViews.color(activity, listOf("Alex", "Blair").indexOf(series.title))
+                        val formatter = chart.getFormatter(series, com.androidplot.xy.LineAndPointRenderer::class.java) as com.androidplot.xy.LineAndPointFormatter
+                        assertEquals(expected, formatter.linePaint.color)
+                        assertEquals(expected, views.filterIsInstance<CheckBox>().first { it.text == series.title }.currentTextColor)
+                        assertEquals(1L, (0 until series.size()).sumOf { series.getY(it).toLong() })
+                    }
+                    assertEquals("1.2.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date (D.M.YY)" }.text.toString())
+                    assertEquals("2.2.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Ending date (D.M.YY)" }.text.toString())
+                    assertEquals(activity.primaryTextAccent, views.filterIsInstance<Button>().first { it.text == "Update graph" }.currentTextColor)
+                }
+                if (option in listOf(ColorTheme.PRUSSIAN, ColorTheme.JADE)) screenshot("graphs-theme-${option.ordinal + 1}.png")
+                scenario.onActivity { activity ->
+                    activity.findViewById<RadioButton>(R.id.tab_reports).performClick()
+                    val heading = activity.window.decorView.findViewWithTag<View>("report-heading-0")
+                    val labels = descendants(heading).filterIsInstance<TextView>().toList()
+                    assertEquals(activity.primaryTextAccent, labels.first { it.text == "01" }.currentTextColor)
+                    assertEquals(activity.secondaryTextAccent, labels.first { it.text == "Participant totals" }.currentTextColor)
+                }
+                instrumentation.waitForIdleSync()
+                if (option in listOf(ColorTheme.PRUSSIAN, ColorTheme.JADE)) screenshot("reports-theme-${option.ordinal + 1}.png")
+                scenario.onActivity { activity ->
+                    activity.findViewById<RadioButton>(R.id.tab_graphs).performClick()
+                    descendants(activity.window.decorView).filterIsInstance<ImageButton>().single { it.contentDescription == "App settings" }.performClick()
+                }
+            }
+            scenario.recreate()
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                assertTrue(activity.window.decorView.findViewWithTag<RadioButton>("theme-${finalTheme.ordinal}").isChecked)
+                assertTrue(activity.window.decorView.findViewWithTag<View>("app-settings").isShown)
+                descendants(activity.window.decorView).filterIsInstance<ImageButton>().single { it.contentDescription == "Back" }.performClick()
+                assertTrue(activity.findViewById<RadioButton>(R.id.tab_graphs).isShown)
+            }
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertEquals(finalTheme, activity.savedColorTheme())
+                assertEquals(android.view.ContextThemeWrapper(context, finalTheme.style).primaryAccent, activity.primaryAccent)
+                descendants(activity.window.decorView).filterIsInstance<ImageButton>().single { it.contentDescription == "App settings" }.performClick()
+                assertTrue(activity.window.decorView.findViewWithTag<RadioButton>("theme-${finalTheme.ordinal}").isChecked)
+            }
+        }
+    }
+
+    @Test
+    fun themeSwatchesStayAlignedAtPhoneAndTabletWidths() {
+        val expectedLabels = listOf(
+            "Cyber Shark", "Wither", "Dusk", "Coffee Shop", "Garden", "Console", "Nostalgia",
+            "Dim Light", "Eden", "Neon Lights", "Pacman", "Mediterranean", "Synth Wave", "Love Letter",
+        )
+        instrumentation.runOnMainSync {
+            for (fontScale in listOf(1f, 1.4f)) for (width in listOf(320, 800)) {
+                val configuration = android.content.res.Configuration(context.resources.configuration).apply { this.fontScale = fontScale }
+                val themed = android.view.ContextThemeWrapper(context.createConfigurationContext(configuration), ColorTheme.NEON.style)
+                val page = SettingsViews.page(themed, ColorTheme.NEON, back = {}, choose = {})
+                page.measure(View.MeasureSpec.makeMeasureSpec(themed.dp(width), View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(themed.dp(800), View.MeasureSpec.EXACTLY))
+                page.layout(0, 0, page.measuredWidth, page.measuredHeight)
+                val rows = descendants(page).filterIsInstance<RadioButton>().toList()
+                assertEquals(14, rows.size)
+                assertEquals(expectedLabels, rows.map { it.text.toString() })
+                val rightEdges = rows.map { it.right - it.paddingRight }.distinct()
+                assertEquals("Swatches must align at the right edge", 1, rightEdges.size)
+                rows.forEachIndexed { index, row ->
+                    row.jumpDrawablesToCurrentState()
+                    val available = row.width - row.compoundPaddingLeft - row.compoundPaddingRight
+                    assertEquals(1, row.layout.lineCount)
+                    assertTrue("Theme label overlaps swatches at ${width}dp", row.layout.getLineMax(0) <= available + 1)
+                    assertTrue(row.height >= themed.dp(64))
+                    val drawable = row.compoundDrawables[2]!!
+                    val bitmap = Bitmap.createBitmap(drawable.bounds.width(), drawable.bounds.height(), Bitmap.Config.ARGB_8888)
+                    drawable.draw(android.graphics.Canvas(bitmap))
+                    val palette = android.view.ContextThemeWrapper(themed, ColorTheme.entries[index].style)
+                    assertEquals(palette.primaryAccent, bitmap.getPixel(bitmap.width / 4, bitmap.height / 2))
+                    assertEquals(palette.secondaryAccent, bitmap.getPixel(bitmap.width * 3 / 4, bitmap.height / 2))
+                    assertTrue("Swatches need a visible halo", Color.alpha(bitmap.getPixel(themed.dp(9), bitmap.height / 2)) in 1..254)
+                    assertEquals("Swatch glow must not be clipped", 0, Color.alpha(bitmap.getPixel(0, bitmap.height / 2)))
+                    val rendered = Bitmap.createBitmap(row.width, row.height, Bitmap.Config.ARGB_8888)
+                    row.draw(android.graphics.Canvas(rendered))
+                    val swatchLeft = row.width - row.paddingRight - bitmap.width
+                    assertEquals("Primary swatch must appear in the row", palette.primaryAccent, rendered.getPixel(swatchLeft + bitmap.width / 4, row.height / 2))
+                    assertEquals("Secondary swatch must appear in the row", palette.secondaryAccent, rendered.getPixel(swatchLeft + bitmap.width * 3 / 4, row.height / 2))
+                    rendered.recycle()
+                    bitmap.recycle()
+                }
+                val scroll = descendants(page).filterIsInstance<ScrollView>().single()
+                assertTrue("The full theme list must scroll", scroll.canScrollVertically(1))
+                for (bottom in listOf(false, true)) {
+                    scroll.scrollTo(0, if (bottom) scroll.getChildAt(0).height else 0)
+                    val screenshot = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                    page.draw(android.graphics.Canvas(screenshot))
+                    File(context.getExternalFilesDir(null), "settings-${width}dp-$fontScale${if (bottom) "-bottom" else ""}.png")
+                        .outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    screenshot.recycle()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun controlsHaveSaturatedAccentsAndVisibleStatefulGlow() {
+        val components = FloatArray(3)
+        Color.colorToHSV(context.primaryAccent, components)
+        assertTrue("Green should be saturated", components[1] >= 0.65f)
+        Color.colorToHSV(context.secondaryAccent, components)
+        assertTrue("Violet should be saturated", components[1] >= 0.5f)
+        assertEquals(context.primaryAccent, ChartViews.color(context, 0))
+        assertEquals(context.secondaryAccent, ChartViews.color(context, 1))
+
+        instrumentation.runOnMainSync {
+            for (width in listOf(320, 800)) {
+                fun halo(primary: Boolean, vararg state: Int): Int {
+                    val bitmap = Bitmap.createBitmap(context.dp(width), context.dp(48), Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(bitmap).apply { drawColor(canvasColor) }
+                    val background = context.controlBackground(primary).apply {
+                        setBounds(0, 0, bitmap.width, bitmap.height)
+                        this.state = state
+                        jumpToCurrentState()
+                    }
+                    background.draw(canvas)
+                    assertEquals("Glow must fit inside the control", canvasColor, bitmap.getPixel(0, bitmap.height / 2))
+                    val pixel = bitmap.getPixel(context.dp(3), bitmap.height / 2)
+                    bitmap.recycle()
+                    return pixel
+                }
+
+                val resting = halo(false, android.R.attr.state_enabled)
+                val focused = halo(false, android.R.attr.state_enabled, android.R.attr.state_focused)
+                val pressed = halo(false, android.R.attr.state_enabled, android.R.attr.state_pressed)
+                val primary = halo(true, android.R.attr.state_enabled)
+                val checked = halo(false, android.R.attr.state_enabled, android.R.attr.state_checked)
+                val disabled = halo(false)
+                assertTrue("Resting fields need a visible violet halo", Color.blue(resting) > Color.blue(canvasColor) + 12)
+                assertTrue("Focused fields need a stronger halo", Color.blue(focused) > Color.blue(resting) + 8)
+                assertTrue("Pressed controls need a stronger halo", Color.blue(pressed) >= Color.blue(focused))
+                assertTrue("Primary actions need a green halo", Color.green(primary) > Color.blue(primary) + 8)
+                assertTrue("Selected tabs need a green halo", Color.green(checked) > Color.blue(checked) + 8)
+                assertEquals("Disabled controls must not glow", canvasColor, disabled)
+            }
+        }
+    }
+
+    @Test
     fun importDefaultsAcceptWholeChatAndPreserveSavedRange() {
         val preferences = context.getSharedPreferences("poruke", 0)
         preferences.edit().clear().commit()
@@ -77,10 +328,11 @@ class AppSmokeTest {
                 model = ViewModelProvider(activity)[AppModel::class.java]
                 model.addFiles(listOf(Uri.fromFile(file)))
                 val views = descendants(activity.window.decorView).toList()
-                val start = views.filterIsInstance<EditText>().first { it.contentDescription == "Start month" }
-                val end = views.filterIsInstance<EditText>().first { it.contentDescription == "End month" }
+                val start = views.filterIsInstance<EditText>().first { it.contentDescription == "Start month (M.YY)" }
+                val end = views.filterIsInstance<EditText>().first { it.contentDescription == "End month (M.YY)" }
                 assertEquals("0.0", start.text.toString())
                 assertEquals("12.99", end.text.toString())
+                assertEquals("", views.filterIsInstance<EditText>().first { it.contentDescription == "Participants (one per line)" }.text.toString())
                 views.filterIsInstance<EditText>().first { it.contentDescription == "Participants (one per line)" }.setText("Alex\nBlair")
                 views.filterIsInstance<Button>().first { it.text == "Analyze" }.performClick()
             }
@@ -106,8 +358,8 @@ class AppSmokeTest {
             screenshot("import-default-months.png")
             scenario.onActivity { activity ->
                 val views = descendants(activity.window.decorView).toList()
-                views.filterIsInstance<EditText>().first { it.contentDescription == "Start month" }.setText("1.24")
-                views.filterIsInstance<EditText>().first { it.contentDescription == "End month" }.setText("3.24")
+                views.filterIsInstance<EditText>().first { it.contentDescription == "Start month (M.YY)" }.setText("1.24")
+                views.filterIsInstance<EditText>().first { it.contentDescription == "End month (M.YY)" }.setText("3.24")
                 views.filterIsInstance<Button>().first { it.text == "Analyze" }.performClick()
             }
             runBlocking {
@@ -119,9 +371,63 @@ class AppSmokeTest {
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 val inputs = descendants(activity.window.decorView).filterIsInstance<EditText>().toList()
-                assertEquals("1.24", inputs.first { it.contentDescription == "Start month" }.text.toString())
-                assertEquals("3.24", inputs.first { it.contentDescription == "End month" }.text.toString())
+                assertEquals("1.24", inputs.first { it.contentDescription == "Start month (M.YY)" }.text.toString())
+                assertEquals("3.24", inputs.first { it.contentDescription == "End month (M.YY)" }.text.toString())
+                assertEquals("Alex\nBlair", inputs.first { it.contentDescription == "Participants (one per line)" }.text.toString())
                 assertEquals(3L, ViewModelProvider(activity)[AppModel::class.java].state.value.result!!.rangeTotal)
+            }
+        }
+    }
+
+    @Test
+    fun savedCountingRulesUseTheCorrectedSingleMode() {
+        val preferences = context.getSharedPreferences("poruke", 0)
+        val file = File(context.filesDir, "single-rules-chat.txt").apply {
+            writeText(listOf(
+                "31.1.24., 07:00 - Alex: outside range",
+                "outside continuation",
+                "1.2.24., 08:09 - Alex Phone: hello there",
+                "another three words",
+                "29.2.24., 09:19 - Alex: leap day",
+                "and more",
+                "1.3.24., 10:00 - Alex: outside again",
+            ).joinToString("\n"))
+        }
+        for (savedRule in listOf("PYTHON_COMPATIBLE", "CALENDAR_CORRECT")) for (mode in com.porukecounter.core.CountMode.entries) {
+            preferences.edit().clear().putString("names", "Alex")
+                .putString("start", "2.24").putString("end", "2.24")
+                .putString("mode", mode.name).putString("rules", savedRule).commit()
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                lateinit var model: AppModel
+                scenario.onActivity { activity ->
+                    val views = descendants(activity.window.decorView).toList()
+                    assertTrue(views.none { it.contentDescription == "Counting rules" })
+                    assertTrue(views.none { it is TextView && it.text == "Counting rules" })
+                    model = ViewModelProvider(activity)[AppModel::class.java]
+                    assertEquals(mode, model.savedConfig().countMode)
+                    model.addFiles(listOf(Uri.fromFile(file)))
+                    model.analyze(model.savedConfig())
+                }
+                runBlocking { withTimeout(15000) { model.state.first { !it.busy && it.result != null } } }
+                instrumentation.waitForIdleSync()
+                val result = model.state.value.result!!
+                val expected = if (mode == com.porukecounter.core.CountMode.MESSAGES) 2L else 9L
+                assertEquals(29, result.days.size)
+                assertEquals("29.2.24", result.days.last())
+                assertEquals(expected, result.rangeTotal)
+                assertEquals(expected, result.total)
+                assertEquals(expected, result.hourlyTotal)
+                assertEquals(expected, result.files.single().totals.getValue("Alex"))
+                assertTrue("Obsolete saved counting rules must be removed", !preferences.contains("rules"))
+                scenario.recreate()
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { activity ->
+                    val config = ViewModelProvider(activity)[AppModel::class.java].savedConfig()
+                    assertEquals(listOf("Alex"), config.names)
+                    assertEquals("2.24", config.startMonth)
+                    assertEquals("2.24", config.endMonth)
+                    assertEquals(mode, config.countMode)
+                }
             }
         }
     }
@@ -140,8 +446,8 @@ class AppSmokeTest {
                     (views.first { it is EditText && it.contentDescription == label } as EditText).setText(value)
                 }
                 input("Participants (one per line)", "Alex\nBlair")
-                input("Start month", "2.24")
-                input("End month", "3.24")
+                input("Start month (M.YY)", "2.24")
+                input("End month (M.YY)", "3.24")
                 (views.first { it is Button && it.text == "Analyze" } as Button).performClick()
             }
             runBlocking {
@@ -232,6 +538,9 @@ class AppSmokeTest {
             scenario.onActivity { activity ->
                 assertTrue(descendants(activity.window.decorView).any { it is TextView && it.text == "Participant totals" })
                 val reportViews = descendants(activity.window.decorView).toList()
+                assertTrue(reportViews.any { it is TextView && it.text == "Latest month" })
+                assertTrue(reportViews.any { it is TextView && it.text == "Daily report starting date (D.M.YY)" })
+                assertTrue(reportViews.any { it is TextView && it.text == "Monthly report starting month (M.YY)" })
                 assertTrue(reportViews.none { it is TextView && it.text in listOf("EXPORT", "Export count", "Export threshold", "Export status") })
                 assertTrue(reportViews.none { it is EditText && it.contentDescription in listOf("New export warning threshold", "Export count override (optional)") })
                 assertTrue(reportViews.any { it is ImageButton && it.contentDescription == "Export reports CSV" })
@@ -277,7 +586,7 @@ class AppSmokeTest {
                     assertEquals(names, chart.registry.seriesList.map { it.title })
                     for (series in chart.registry.seriesList) {
                         val checkbox = checks.first { it.text == series.title }
-                        val expected = ChartViews.color(listOf("Alex", "Blair").indexOf(series.title))
+                        val expected = ChartViews.color(activity, listOf("Alex", "Blair").indexOf(series.title))
                         assertEquals(expected, checkbox.currentTextColor)
                         val formatter = chart.getFormatter(series, com.androidplot.xy.LineAndPointRenderer::class.java) as com.androidplot.xy.LineAndPointFormatter
                         assertEquals(expected, formatter.linePaint.color)
@@ -336,7 +645,7 @@ class AppSmokeTest {
                 val options = GraphOptions(listOf("Blair"), legend = true, xSize = 8, ySize = 5)
                 val charts = Graphs.build(model.state.value.result!!, GraphKind.HOURS, options)
                 val bitmap = ChartViews.bitmap(context, charts, options)
-                val expected = ChartViews.color(1, export = true)
+                val expected = ChartViews.color(context, 1, export = true)
                 var linePixels = 0
                 var legendPixels = 0
                 for (vertical in 0 until bitmap.height) for (horizontal in 0 until bitmap.width) {
@@ -384,8 +693,8 @@ class AppSmokeTest {
             fun assertRange(startingDate: String, endingDate: String, expectedCount: Long) {
                 scenario.onActivity { activity ->
                     val views = descendants(activity.window.decorView).toList()
-                    val start = views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date" }
-                    val end = views.filterIsInstance<EditText>().first { it.contentDescription == "Ending date" }
+                    val start = views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date (D.M.YY)" }
+                    val end = views.filterIsInstance<EditText>().first { it.contentDescription == "Ending date (D.M.YY)" }
                     assertTrue("Missing visible date controls", start.isShown && end.isShown)
                     assertEquals(startingDate, start.text.toString())
                     assertEquals(endingDate, end.text.toString())
@@ -408,8 +717,8 @@ class AppSmokeTest {
             }
             scenario.onActivity { activity ->
                 val fields = descendants(activity.window.decorView).filterIsInstance<EditText>().toList()
-                fields.first { it.contentDescription == "Starting date" }.setText("1.2.24")
-                fields.first { it.contentDescription == "Ending date" }.setText("1.3.24")
+                fields.first { it.contentDescription == "Starting date (D.M.YY)" }.setText("1.2.24")
+                fields.first { it.contentDescription == "Ending date (D.M.YY)" }.setText("1.3.24")
             }
             select(GraphKind.HOURS)
             assertRange("1.2.24", "1.3.24", 3L)
@@ -427,7 +736,7 @@ class AppSmokeTest {
             scenario.onActivity { activity ->
                 val views = descendants(activity.window.decorView).toList()
                 assertEquals("Monthly comparison", views.filterIsInstance<EditText>().first { it.contentDescription == "Title" }.text.toString())
-                views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date" }.setText("2.2.24")
+                views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date (D.M.YY)" }.setText("2.2.24")
                 views.filterIsInstance<Button>().first { it.text == "Update graph" }.performClick()
             }
             instrumentation.waitForIdleSync()
@@ -455,8 +764,8 @@ class AppSmokeTest {
             scenario.onActivity { activity ->
                 activity.findViewById<RadioButton>(R.id.tab_graphs).performClick()
                 val views = descendants(activity.window.decorView).toList()
-                assertEquals("2.2.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date" }.text.toString())
-                assertEquals("1.3.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Ending date" }.text.toString())
+                assertEquals("2.2.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Starting date (D.M.YY)" }.text.toString())
+                assertEquals("1.3.24", views.filterIsInstance<EditText>().first { it.contentDescription == "Ending date (D.M.YY)" }.text.toString())
                 assertEquals("Hourly comparison", views.filterIsInstance<EditText>().first { it.contentDescription == "Title" }.text.toString())
                 val chart = views.filterIsInstance<com.androidplot.xy.XYPlot>().first { it.isShown }
                 assertEquals(2L, chart.registry.seriesList.sumOf { series -> (0 until series.size()).sumOf { series.getY(it).toLong() } })
@@ -559,7 +868,7 @@ class AppSmokeTest {
                         }
                         var seriesPixels = 0
                         for (vertical in 0 until bitmap.height step 2) for (horizontal in 0 until bitmap.width step 2) {
-                            if (bitmap.getPixel(horizontal, vertical) == ChartViews.color(0)) seriesPixels++
+                            if (bitmap.getPixel(horizontal, vertical) == ChartViews.color(context, 0)) seriesPixels++
                         }
                         assertTrue("Graph is blank at ${width}dp", seriesPixels > 10)
                         File(context.getExternalFilesDir(null), "graph-$labelKind-${width}dp-${if (expanded) "wide" else "fitted"}.png")
@@ -797,7 +1106,7 @@ class AppSmokeTest {
         val preferences = context.getSharedPreferences("poruke", 0)
         preferences.edit().clear()
             .putString("names", "Alex\nBlair").putString("start", "2.24").putString("end", "3.24").commit()
-        val titles = listOf("Participant totals", "Monthly counts", "Daily counts", "Latest month (Python)", "Summary")
+        val titles = listOf("Participant totals", "Monthly counts", "Daily counts", "Latest month", "Summary")
         val file = File(context.filesDir, "collapsible-reports.txt").apply { writeText(sample) }
         fun assertExpanded(scenario: ActivityScenario<MainActivity>, expanded: Set<Int>) {
             scenario.onActivity { activity ->

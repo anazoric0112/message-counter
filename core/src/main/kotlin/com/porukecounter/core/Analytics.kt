@@ -21,14 +21,12 @@ data class MonthKey(val month: Int, val year: Int) : Comparable<MonthKey> {
 }
 
 enum class CountMode { MESSAGES, WORDS }
-enum class CountingRules { PYTHON_COMPATIBLE, CALENDAR_CORRECT }
 
 data class AnalysisConfig(
-    val names: List<String> = listOf("Ana", "Zara"),
+    val names: List<String> = emptyList(),
     val startMonth: String = "0.0",
     val endMonth: String = "12.99",
     val countMode: CountMode = CountMode.MESSAGES,
-    val rules: CountingRules = CountingRules.PYTHON_COMPATIBLE,
 ) {
     internal val hasOpenStart: Boolean get() = startMonth.trim().trimEnd('.') == "0.0"
     internal fun firstMonth(): MonthKey = if (hasOpenStart) {
@@ -81,8 +79,7 @@ data class AnalysisResult(
 }
 
 class ChatAnalyzer(val config: AnalysisConfig) {
-    private val headerPattern = Regex("(\\d{1,2})\\.(\\d{1,2})\\.(\\d{1,2})\\., (\\d{1,2}):(\\d{1,2}) - ([^:]+):")
-    private val calendarHeader = Regex("^(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2,4})\\.?, (\\d{1,2}):(\\d{2}) - ([^:]+): ?(.*)$")
+    private val headerPattern = Regex("^(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2,4})\\.?, (\\d{1,2}):(\\d{1,2}) - ([^:]+): ?(.*)$")
     private val datedLine = Regex("^\\d{1,2}\\.\\d{1,2}\\.\\d{2,4}\\.?, \\d{1,2}:\\d{2} - ")
     private val whitespace = Regex("\\s+")
     private val months: List<String>
@@ -110,8 +107,7 @@ class ChatAnalyzer(val config: AnalysisConfig) {
         }.map { it.toString() }.toList()
         days = months.flatMap { month ->
             val key = MonthKey.parse(month)
-            val length = if (config.rules == CountingRules.PYTHON_COMPATIBLE) 31 else
-                LocalDate.of(if (key.year < 100) 2000 + key.year else key.year, key.month, 1).lengthOfMonth()
+            val length = LocalDate.of(if (key.year < 100) 2000 + key.year else key.year, key.month, 1).lengthOfMonth()
             (1..length).map { day -> "$day.$month" }
         }
         monthIndices = months.withIndex().associate { it.value to it.index }
@@ -122,84 +118,18 @@ class ChatAnalyzer(val config: AnalysisConfig) {
     }
 
     fun consume(filename: String, lines: Sequence<String>) {
-        if (config.rules == CountingRules.CALENDAR_CORRECT) {
-            consumeCalendar(filename, lines)
-            return
-        }
-        val fileTotals = config.names.associateWith { 0L }.toMutableMap()
-        for (line in lines) {
-            lineCount++
-            val match = headerPattern.find(line)
-            if (match == null) {
-                skippedLines++
-                continue
-            }
-            headerCount++
-            val sender = match.groupValues[6]
-            val matchedName = config.names.lastOrNull { sender.startsWith(it) }
-            if (matchedName == null) unmatchedSenders++
-            val name = matchedName ?: previousName ?: continue
-            previousName = name
-            if (config.countMode == CountMode.WORDS && line.contains("<Media omitted>")) continue
-
-            val hour = match.groupValues[4].toInt()
-            val minute = match.groupValues[5].toInt()
-            if (hour !in 0..23 || minute !in 0..59) {
-                invalidHeaders++
-                continue
-            }
-            val increment = if (config.countMode == CountMode.MESSAGES) 1L else {
-                val content = if (!line.contains(name)) line else {
-                    val firstColon = line.indexOf(':')
-                    val secondColon = line.indexOf(':', firstColon + 1)
-                    line.substring(if (secondColon >= 0) secondColon + 1 else firstColon + 1)
-                }
-                countWords(content)
-            }
-            val totalIncrement = if (config.countMode == CountMode.MESSAGES && !line.contains(name)) 0L else increment
-            val person = people.getValue(name)
-            person.total += totalIncrement
-            fileTotals[name] = fileTotals.getValue(name) + totalIncrement
-            person.hours[hour] += increment
-            person.tenMinutes[hour * 6 + minute / 10] += increment
-
-            val monthLabel = "${match.groupValues[2]}.${match.groupValues[3]}"
-            val dayLabel = "${match.groupValues[1]}.$monthLabel"
-            if (increment != 0L) {
-                person.tenMinutesByDay.getOrPut(dayLabel) { LongArray(144) }[hour * 6 + minute / 10] += increment
-            }
-            val monthIndex = monthIndices[monthLabel] ?: continue
-            val dayIndex = dayIndices[dayLabel]
-            val date = runCatching {
-                LocalDate.of(match.groupValues[3].toInt(), match.groupValues[2].toInt(), match.groupValues[1].toInt())
-            }.getOrNull()
-            if (dayIndex == null || date == null) {
-                invalidHeaders++
-                continue
-            }
-            firstIncludedMonth = minOf(firstIncludedMonth, monthIndex)
-            lastIncludedMonth = maxOf(lastIncludedMonth, monthIndex)
-            dayTotals[dayIndex] += increment
-            monthTotals[monthIndex] += increment
-            person.days[dayIndex] += increment
-            person.months[monthIndex] += increment
-            person.weekdays[date.dayOfWeek.value - 1] += increment
-        }
-        files += FileCounts(filename, fileTotals.toMap())
-    }
-
-    private fun consumeCalendar(filename: String, lines: Sequence<String>) {
         val fileTotals = config.names.associateWith { 0L }.toMutableMap()
         var pending: MatchResult? = null
         val body = StringBuilder()
         fun flush() {
             val match = pending ?: return
             pending = null
-            val name = match.groupValues[6]
-            if (name !in people) {
-                unmatchedSenders++
-                return
-            }
+            val sender = match.groupValues[6]
+            val matchedName = config.names.lastOrNull { sender.startsWith(it) }
+            if (matchedName == null) unmatchedSenders++
+            val name = matchedName ?: previousName ?: return
+            previousName = name
+            if (config.countMode == CountMode.WORDS && body.contains("<Media omitted>")) return
             val rawYear = match.groupValues[3].toInt()
             val year = if (rawYear < 100) 2000 + rawYear else rawYear
             val month = match.groupValues[2].toInt()
@@ -215,15 +145,17 @@ class ChatAnalyzer(val config: AnalysisConfig) {
             val monthIndex = monthIndices["$month.$configuredYear"] ?: return
             val dayIndex = dayIndices["$day.$month.$configuredYear"] ?: return
             val increment = if (config.countMode == CountMode.MESSAGES) 1L else {
-                if (body.contains("<Media omitted>")) 0L else countWords(body.toString())
+                val content = if (match.value.contains(name)) body.substring(match.groups[7]!!.range.first) else body.toString()
+                countWords(content)
             }
+            val totalIncrement = if (config.countMode == CountMode.MESSAGES && !match.value.contains(name)) 0L else increment
             firstIncludedMonth = minOf(firstIncludedMonth, monthIndex)
             lastIncludedMonth = maxOf(lastIncludedMonth, monthIndex)
             val person = people.getValue(name)
-            person.total += increment
+            person.total += totalIncrement
             person.days[dayIndex] += increment
             person.months[monthIndex] += increment
-            person.weekdays[date.dayOfWeek.value - 1] += increment
+            person.weekdays[LocalDate.of(rawYear, month, day).dayOfWeek.value - 1] += increment
             person.hours[hour] += increment
             person.tenMinutes[hour * 6 + minute / 10] += increment
             if (increment != 0L) {
@@ -231,18 +163,18 @@ class ChatAnalyzer(val config: AnalysisConfig) {
             }
             dayTotals[dayIndex] += increment
             monthTotals[monthIndex] += increment
-            fileTotals[name] = fileTotals.getValue(name) + increment
+            fileTotals[name] = fileTotals.getValue(name) + totalIncrement
         }
         for (rawLine in lines) {
             lineCount++
             val line = rawLine.trimStart('\uFEFF', '\u200E', '\u200F')
-            val match = calendarHeader.find(line)
+            val match = headerPattern.find(line)
             if (match != null) {
                 flush()
                 headerCount++
                 pending = match
                 body.clear()
-                body.append(match.groupValues[7])
+                body.append(line)
             } else if (datedLine.containsMatchIn(line)) {
                 flush()
                 skippedLines++
